@@ -1,5 +1,6 @@
 import time
 import math
+from datetime import datetime
 from collections import deque, defaultdict
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
@@ -18,7 +19,16 @@ GROUP_CONFIGS = {
         # 该群的监控名单（刷屏的人）
         "target_users": [12345678, 87654321, 111111],
         # 几句开始触发禁言（默认5句以后，即第6句开始）
-        "threshold": 5
+        "threshold": 5,
+        # 定时禁言配置
+        "scheduled_mute": {
+            "enabled": False,     # 是否开启定时禁言
+            "cooldown": 30,       # 冷却时间（秒），防止刷屏调用API
+            "ranges": [           # 时间段列表
+                ("23:00", "07:00"), # 跨夜：晚上11点到早上7点
+                ("12:00", "13:30")  # 午休
+            ]
+        }
     },
 
     # === 群号 333444 (另一个群) ===
@@ -41,6 +51,71 @@ MUTE_LEVELS = [1, 2, 3, 5, 7, 10, 13, 17, 21]
 group_combo_counts = defaultdict(int)
 # Group ID -> 上一次 Target User 发言的时间戳
 group_last_activity_times = defaultdict(int)
+# Group ID -> 上一次执行定时禁言的时间戳
+group_last_schedule_enforcement_times = defaultdict(int)
+
+def parse_time(time_str):
+    """解析 "HH:MM" 格式的时间字符串为 (hour, minute)"""
+    try:
+        t = datetime.strptime(time_str, "%H:%M").time()
+        return t.hour, t.minute
+    except ValueError:
+        return None
+
+def check_scheduled_mute(current_dt, ranges):
+    """
+    检查当前时间是否在设定范围内
+    返回: (是否在范围内, 剩余禁言时长(秒))
+    """
+    now_time = current_dt.time()
+    current_minutes = now_time.hour * 60 + now_time.minute
+    
+    max_duration = 0
+    in_range = False
+    
+    for start_str, end_str in ranges:
+        start_time = parse_time(start_str)
+        end_time = parse_time(end_str)
+
+        if start_time is None or end_time is None:
+            print(f"Skipping invalid time range: {start_str} - {end_str}")
+            continue
+
+        start_h, start_m = start_time
+        end_h, end_m = end_time
+        
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+        
+        # 计算该时间段是否包含当前时间
+        is_current_in = False
+        duration = 0
+        
+        if start_minutes <= end_minutes:
+            # 同一天的时间段 (e.g. 12:00 - 13:00)
+            if start_minutes <= current_minutes < end_minutes:
+                is_current_in = True
+                duration = (end_minutes - current_minutes) * 60
+        else:
+            # 跨夜时间段 (e.g. 23:00 - 07:00)
+            # 23:00 - 24:00 (当天) OR 00:00 - 07:00 (次日)
+            if current_minutes >= start_minutes:
+                # 在前半段 (e.g. 23:30)
+                is_current_in = True
+                # 剩余时间 = (24*60 - current) + end
+                duration = ((24 * 60 - current_minutes) + end_minutes) * 60
+            elif current_minutes < end_minutes:
+                # 在后半段 (e.g. 06:00)
+                is_current_in = True
+                duration = (end_minutes - current_minutes) * 60
+        
+        if is_current_in:
+            in_range = True
+            # 取最长的剩余时间（防止重叠时间段问题）
+            if duration > max_duration:
+                max_duration = duration
+                
+    return in_range, max_duration
 
 # 注册消息事件响应器
 monitor_msg = on_message(priority=10, block=False)
@@ -58,6 +133,38 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
 
     user_id = event.user_id
     current_time = time.time()
+    current_dt = datetime.now()
+    
+    # === 逻辑分支 0：定时禁言检查 ===
+    # 仅名单用户发言时，检查是否需要触发定时全员禁言
+    scheduled_config = config.get("scheduled_mute", {})
+    if scheduled_config.get("enabled", False) and user_id in target_users:
+        ranges = scheduled_config.get("ranges", [])
+        is_in_time, duration = check_scheduled_mute(current_dt, ranges)
+        
+        if is_in_time:
+            # 冷却检查
+            cooldown = scheduled_config.get("cooldown", 30)
+            last_enforce = group_last_schedule_enforcement_times[group_id]
+            
+            if current_time - last_enforce > cooldown:
+                print(f"群 {group_id} 触发定时禁言，冷却已就绪。剩余时长: {duration}秒")
+                # 对名单内所有用户执行禁言
+                for target_uid in target_users:
+                    try:
+                        await bot.set_group_ban(
+                            group_id=group_id,
+                            user_id=target_uid,
+                            duration=int(duration)
+                        )
+                    except Exception as e:
+                        print(f"定时禁言执行失败 (User {target_uid}): {e}")
+                
+                # 更新最后执行时间
+                group_last_schedule_enforcement_times[group_id] = current_time
+            else:
+                # 冷却中，跳过
+                pass
     
     # === 逻辑分支 1：非名单用户 ===
     if user_id not in target_users:
