@@ -61,7 +61,7 @@ def parse_time(time_str):
         t = datetime.strptime(time_str, "%H:%M").time()
         return t.hour, t.minute
     except ValueError:
-        return 0, 0
+        return None
 
 def check_scheduled_mute(current_dt, ranges):
     """
@@ -75,8 +75,15 @@ def check_scheduled_mute(current_dt, ranges):
     in_range = False
     
     for start_str, end_str in ranges:
-        start_h, start_m = parse_time(start_str)
-        end_h, end_m = parse_time(end_str)
+        start_time = parse_time(start_str)
+        end_time = parse_time(end_str)
+
+        if start_time is None or end_time is None:
+            print(f"Skipping invalid time range: {start_str} - {end_str}")
+            continue
+
+        start_h, start_m = start_time
+        end_h, end_m = end_time
         
         start_minutes = start_h * 60 + start_m
         end_minutes = end_h * 60 + end_m
