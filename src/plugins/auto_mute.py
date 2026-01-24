@@ -148,7 +148,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
             last_enforce = group_last_schedule_enforcement_times[group_id]
             
             if current_time - last_enforce > cooldown:
-                print(f"群 {group_id} 触发定时禁言及实施对象，冷却已就绪。剩余时长: {duration}秒")
+                print(f"群 {group_id} 触发定时禁言，冷却已就绪。剩余时长: {duration}秒")
                 # 对名单内所有用户执行禁言
                 for target_uid in target_users:
                     try:
