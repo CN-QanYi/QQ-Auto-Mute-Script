@@ -139,7 +139,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
     # === 逻辑分支 0：定时禁言检查 ===
     # 只要有人说话，就检查是否需要触发定时全员禁言
     scheduled_config = config.get("scheduled_mute", {})
-    if scheduled_config.get("enabled", False):
+    if scheduled_config.get("enabled", False) and user_id in target_users:
         ranges = scheduled_config.get("ranges", [])
         is_in_time, duration = check_scheduled_mute(current_dt, ranges)
         
