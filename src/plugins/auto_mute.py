@@ -48,7 +48,6 @@ MUTE_LEVELS = [1, 2, 3, 5, 7, 10, 13, 17, 21]
 
 # 全局状态变量 (使用 defaultdict 自动处理新群)
 # Group ID -> 当前连续的名单用户发言数量
-# Group ID -> 当前连续的名单用户发言数量
 group_combo_counts = defaultdict(int)
 # Group ID -> 上一次 Target User 发言的时间戳
 group_last_activity_times = defaultdict(int)
