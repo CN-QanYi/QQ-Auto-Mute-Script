@@ -177,12 +177,21 @@ async def update_config(config: Dict[str, Any], authorized: bool = Depends(verif
     
     if save_config(validated_config):
         # 通知 auto_mute 插件重新加载配置
+        reload_ok = True
+        reload_err = None
         try:
             from src.plugins.auto_mute import reload_config
             reload_config()
         except Exception as e:
+            reload_ok = False
+            reload_err = str(e)
             logger.error(f"重新加载配置失败: {e}")
-        return {"success": True, "message": "配置已保存"}
+        return {
+            "success": True,
+            "message": "配置已保存",
+            "reload_ok": reload_ok,
+            "reload_error": reload_err
+        }
     return {"success": False, "error": "保存失败"}
 
 
@@ -212,13 +221,23 @@ async def update_group_config(group_id: str, group_config: Dict[str, Any], autho
 async def delete_group_config(group_id: str, authorized: bool = Depends(verify_api_key)):
     """删除群配置"""
     config = load_config()
-    if group_id in config:
-        del config[group_id]
-        if save_config(config):
-            try:
-                from src.plugins.auto_mute import reload_config
-                reload_config()
-            except Exception as e:
-                logger.error(f"重新加载配置失败: {e}")
-            return {"success": True, "message": f"群 {group_id} 配置已删除"}
-    return {"success": False, "error": "配置不存在或删除失败"}
+    
+    # 检查配置是否存在
+    if group_id not in config:
+        return {"success": False, "error": "配置不存在"}
+    
+    del config[group_id]
+    
+    # 尝试保存
+    if not save_config(config):
+        logger.error(f"删除群 {group_id} 配置后保存失败")
+        return {"success": False, "error": "保存失败"}
+    
+    # 保存成功，尝试重新加载配置
+    try:
+        from src.plugins.auto_mute import reload_config
+        reload_config()
+    except Exception as e:
+        logger.error(f"重新加载配置失败: {e}")
+    
+    return {"success": True, "message": f"群 {group_id} 配置已删除"}

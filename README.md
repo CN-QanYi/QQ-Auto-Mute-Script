@@ -65,9 +65,34 @@ HOST=127.0.0.1     # 监听地址
 PORT=8080          # 监听端口
 LOG_LEVEL=INFO     # 日志等级
 COMMAND_START=["/"]
+WEBUI_API_KEY=     # WebUI API 密钥（参见下方说明）
 ```
 
 如果你修改了 `HOST` / `PORT`，请同步更新 OneBot 的反向 WebSocket 地址。
+
+#### WebUI 认证说明 (`WEBUI_API_KEY`)
+
+`WEBUI_API_KEY` 用于保护 WebUI 的 API 接口，对应代码中的 `API_KEY` 变量和 `verify_api_key` 函数。
+
+- **空值**（默认）：认证功能禁用，任何人都可以访问 API
+- **非空值**：所有 API 请求必须在 Header 中包含 `X-API-KEY: <你的密钥>`
+
+> ⚠️ **安全警告**：如果你将 `HOST` 设置为非 `127.0.0.1`（如 `0.0.0.0`）或将服务暴露到互联网，**必须**设置一个强密钥。
+
+**示例配置**：
+```bash
+# 在 .env 文件中
+WEBUI_API_KEY="your-strong-secret-key-here"
+
+# 或在 docker-compose.yml 中
+environment:
+  - WEBUI_API_KEY=your-strong-secret-key-here
+```
+
+**安全建议**：
+- 使用至少 32 位的随机字符串作为密钥
+- 不要将密钥提交到版本控制系统（使用 `.env` 并将其加入 `.gitignore`）
+- 如果密钥泄露，立即更换并重启机器人
 
 ### 5. 连接机器人 (OneBot V11)
 本程序需要配合 **NapCatQQ**, **LLOneBot**, **Lagrange** 等工具使用。
