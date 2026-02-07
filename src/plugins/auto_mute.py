@@ -1,49 +1,68 @@
 import time
 import math
+import json
+from pathlib import Path
 from datetime import datetime
 from collections import deque, defaultdict
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
-# === 配置区域 ===
-# 群组配置：为不同群设置不同的监控名单和阈值
-# 只要不在这个列表里的群，都不会被监控
-GROUP_CONFIGS = {
-    # 示例:
-    # 群号: {
-    #     "target_users": [名单用户列表],
-    #     "threshold": 触发禁言的消息数量
-    # }
-    # === 群号 111222 ===
-    111222: {
-        # 该群的监控名单（刷屏的人）
-        "target_users": [12345678, 87654321, 111111],
-        # 几句开始触发禁言（默认5句以后，即第6句开始）
-        "threshold": 5,
-        # 定时禁言配置
-        "scheduled_mute": {
-            "enabled": False,     # 是否开启定时禁言
-            "cooldown": 30,       # 冷却时间（秒），防止刷屏调用API
-            "ranges": [           # 时间段列表
-                ("23:00", "07:00"), # 跨夜：晚上11点到早上7点
-                ("12:00", "13:30")  # 午休
-            ]
-        }
-    },
+# === 配置文件路径 ===
+CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
 
-    # === 群号 333444 (另一个群) ===
-    333444: {
-        "target_users": [99999],
-        "threshold": 3  # 这个群严格一点，3句就禁言
-    }
-}
-
-# 阶梯式禁言连击判定时间（秒）
-# 如果名单内用户发言间隔超过这个时间，禁言等级重置
-COMBO_TIMEOUT = 180  # 3分钟
+# 默认阶梯式禁言连击判定时间（秒）
+DEFAULT_COMBO_TIMEOUT = 180  # 3分钟
 
 # 阶梯式禁言时长配置（单位：分钟）
 MUTE_LEVELS = [1, 2, 3, 5, 7, 10, 13, 17, 21]
+
+# === 配置加载 ===
+def load_config_from_file():
+    """从 JSON 文件加载配置"""
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                raw_config = json.load(f)
+            
+            # 将字符串键转换为整数（群号）
+            config = {}
+            for group_id_str, group_cfg in raw_config.items():
+                group_id = int(group_id_str)
+                
+                # 处理 ranges 中的数字键（星期）
+                if "scheduled_mute" in group_cfg and "ranges" in group_cfg["scheduled_mute"]:
+                    ranges = group_cfg["scheduled_mute"]["ranges"]
+                    if isinstance(ranges, dict):
+                        new_ranges = {}
+                        for key, value in ranges.items():
+                            # 尝试将键转为整数（星期几）
+                            try:
+                                new_key = int(key)
+                            except (ValueError, TypeError):
+                                new_key = key  # 保持 "default" 等字符串不变
+                            # 将列表转为元组格式
+                            new_ranges[new_key] = [tuple(r) if isinstance(r, list) else r for r in value]
+                        group_cfg["scheduled_mute"]["ranges"] = new_ranges
+                
+                config[group_id] = group_cfg
+            
+            print(f"已从 {CONFIG_PATH} 加载配置，共 {len(config)} 个群")
+            return config
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+            return {}
+    else:
+        print(f"配置文件不存在: {CONFIG_PATH}")
+        return {}
+
+# 全局配置变量
+GROUP_CONFIGS = load_config_from_file()
+
+def reload_config():
+    """重新加载配置（供 WebUI 调用）"""
+    global GROUP_CONFIGS
+    GROUP_CONFIGS = load_config_from_file()
+    print("配置已重新加载")
 # ===============
 
 # 全局状态变量 (使用 defaultdict 自动处理新群)
@@ -62,13 +81,39 @@ def parse_time(time_str):
     except ValueError:
         return None
 
-def check_scheduled_mute(current_dt, ranges):
+def get_ranges_for_day(ranges_config, weekday):
+    """
+    根据星期几获取对应的时间段列表
+    ranges_config: 可以是列表（所有日期通用）或字典（按星期设置）
+    weekday: 0=周一, 1=周二, ..., 6=周日
+    返回: 时间段列表
+    """
+    if isinstance(ranges_config, list):
+        # 旧格式：直接返回列表
+        return ranges_config
+    elif isinstance(ranges_config, dict):
+        # 新格式：按星期查找
+        if weekday in ranges_config:
+            return ranges_config[weekday]
+        elif "default" in ranges_config:
+            return ranges_config["default"]
+        else:
+            return []
+    else:
+        return []
+
+def check_scheduled_mute(current_dt, ranges_config):
     """
     检查当前时间是否在设定范围内
+    ranges_config: 时间段配置（列表或按星期的字典）
     返回: (是否在范围内, 剩余禁言时长(秒))
     """
     now_time = current_dt.time()
     current_minutes = now_time.hour * 60 + now_time.minute
+    weekday = current_dt.weekday()  # 0=周一, 6=周日
+    
+    # 获取今天对应的时间段
+    ranges = get_ranges_for_day(ranges_config, weekday)
     
     max_duration = 0
     in_range = False
@@ -177,10 +222,11 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
 
     # === 逻辑分支 2：名单用户 ===
     
-    # 检查是否超时
+    # 检查是否超时（使用群独立的 combo_timeout）
+    combo_timeout = config.get("combo_timeout", DEFAULT_COMBO_TIMEOUT)
     last_time = group_last_activity_times[group_id]
-    if last_time > 0 and (current_time - last_time > COMBO_TIMEOUT):
-        print(f"群 {group_id} 名单用户发言间隔超过 3 分钟，重置连击计数。")
+    if last_time > 0 and (current_time - last_time > combo_timeout):
+        print(f"群 {group_id} 名单用户发言间隔超过 {combo_timeout} 秒，重置连击计数。")
         group_combo_counts[group_id] = 0
 
     # 更新状态

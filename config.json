@@ -1,0 +1,41 @@
+{
+    "111222": {
+        "target_users": [
+            12345678,
+            87654321,
+            111111
+        ],
+        "threshold": 5,
+        "combo_timeout": 180,
+        "scheduled_mute": {
+            "enabled": false,
+            "cooldown": 30,
+            "ranges": {
+                "default": [
+                    [
+                        "23:00",
+                        "07:00"
+                    ],
+                    [
+                        "12:00",
+                        "13:30"
+                    ]
+                ]
+            }
+        }
+    },
+    "333444": {
+        "target_users": [
+            99999
+        ],
+        "threshold": 3,
+        "combo_timeout": 120,
+        "scheduled_mute": {
+            "enabled": false,
+            "cooldown": 30,
+            "ranges": {
+                "default": []
+            }
+        }
+    }
+}

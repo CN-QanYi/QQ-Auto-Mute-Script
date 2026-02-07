@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQ 自动禁言 - 配置面板</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <h1>🔇 QQ 自动禁言配置面板</h1>
+        <div class="header-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">连接中...</span>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar - Group List -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+                群聊列表
+            </div>
+            <div class="group-list" id="groupList">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="mainContent" style="display: none;">
+            <!-- Member Selection Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="8.5" cy="7" r="4"></circle>
+                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                        </svg>
+                        监控名单
+                    </h3>
+                    <span style="color: var(--text-secondary);">
+                        已选择 <strong id="selectedCount" style="color: var(--accent-color);">0</strong> 人
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="member-search">
+                        <div class="search-wrapper">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" class="search-input" id="memberSearch" placeholder="搜索成员（昵称/QQ号）...">
+                        </div>
+                    </div>
+                    <div class="member-grid" id="memberGrid">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        禁言设置
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>触发阈值（第几条消息开始禁言）</label>
+                            <input type="number" id="threshold" value="5" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label>连击超时（秒）</label>
+                            <input type="number" id="comboTimeout" value="180" min="30" max="3600">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scheduled Mute Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        定时禁言
+                    </h3>
+                    <div class="toggle-wrapper">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">启用</span>
+                        <div class="toggle" id="scheduledMuteToggle" onclick="toggleScheduledMute()"></div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid" style="margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label>冷却时间（秒）</label>
+                            <input type="number" id="cooldown" value="30" min="5" max="300">
+                        </div>
+                    </div>
+                    
+                    <div class="time-ranges">
+                        <label style="display: block; margin-bottom: 12px; color: var(--text-secondary); font-size: 0.85rem;">
+                            时间段设置（可按星期单独配置）
+                        </label>
+                        <div class="day-tabs" id="dayTabs"></div>
+                        <div class="time-range-list" id="timeRangeList"></div>
+                        <button class="btn-add" onclick="addTimeRange()">+ 添加时间段</button>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="actions">
+                        <button class="btn btn-danger" onclick="deleteConfig()">删除配置</button>
+                        <button class="btn btn-primary" onclick="saveConfig()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                            保存配置
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Empty State -->
+        <div class="main-content" id="emptyContent">
+            <div class="card">
+                <div class="empty-state" style="padding: 80px 40px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M15 10l-4 4l6 6l4-16l-18 7l4 2l2 6l3-4"></path>
+                    </svg>
+                    <h3>选择一个群聊开始配置</h3>
+                    <p>从左侧列表中选择要配置的群聊</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
