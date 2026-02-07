@@ -27,7 +27,12 @@ def load_config_from_file():
             # 将字符串键转换为整数（群号）
             config = {}
             for group_id_str, group_cfg in raw_config.items():
-                group_id = int(group_id_str)
+                # 尝试将群号转换为整数，跳过无效的群号
+                try:
+                    group_id = int(group_id_str)
+                except (ValueError, TypeError):
+                    print(f"警告: 无效的群号 '{group_id_str}'，已跳过该配置")
+                    continue
                 
                 # 处理 ranges 中的数字键（星期）
                 if "scheduled_mute" in group_cfg and "ranges" in group_cfg["scheduled_mute"]:

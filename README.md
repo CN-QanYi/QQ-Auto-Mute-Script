@@ -57,7 +57,7 @@ uv pip install -r requirements.txt
 uv pip install nonebot2[fastapi] nonebot-adapter-onebot
 ```
 
-### 3. .env 文件作用
+### 4. .env 文件作用
 项目根目录下的 `.env` 用于配置 NoneBot 的运行参数：
 
 ```
@@ -69,14 +69,14 @@ COMMAND_START=["/"]
 
 如果你修改了 `HOST` / `PORT`，请同步更新 OneBot 的反向 WebSocket 地址。
 
-### 4. 连接机器人 (OneBot V11)
+### 5. 连接机器人 (OneBot V11)
 本程序需要配合 **NapCatQQ**, **LLOneBot**, **Lagrange** 等工具使用。
 请在你的机器人工具中，添加一个 **反向 WebSocket** 连接：
 
 *   **URL**: `ws://127.0.0.1:8080/onebot/v11/ws`
 *   **Token**: (留空)
 
-### 5. 启动
+### 6. 启动
 在终端中运行：
 ```bash
 uv run bot.py
