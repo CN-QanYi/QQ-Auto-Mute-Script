@@ -253,18 +253,8 @@ function renderMembers(filter = '') {
 function toggleMember(userId) {
     if (!currentGroupId) return;
 
-    if (!config[currentGroupId]) {
-        config[currentGroupId] = {
-            target_users: [],
-            threshold: 5,
-            combo_timeout: 180,
-            scheduled_mute: {
-                enabled: false,
-                cooldown: 30,
-                ranges: { default: [] }
-            }
-        };
-    }
+    // 使用统一的配置初始化函数
+    ensureGroupConfig();
 
     const targetUsers = config[currentGroupId].target_users;
     const index = targetUsers.indexOf(userId);
@@ -316,10 +306,10 @@ function loadGroupConfig(groupId) {
         }
     };
 
-    // 填充表单
-    document.getElementById('threshold').value = groupConfig.threshold || 5;
-    document.getElementById('comboTimeout').value = groupConfig.combo_timeout || 180;
-    document.getElementById('cooldown').value = groupConfig.scheduled_mute?.cooldown || 30;
+    // 填充表单（使用 ?? 保留合法的 0 值）
+    document.getElementById('threshold').value = String(groupConfig.threshold ?? 5);
+    document.getElementById('comboTimeout').value = String(groupConfig.combo_timeout ?? 180);
+    document.getElementById('cooldown').value = String(groupConfig.scheduled_mute?.cooldown ?? 30);
 
     // 定时禁言开关
     const toggle = document.getElementById('scheduledMuteToggle');
