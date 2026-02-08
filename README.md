@@ -27,68 +27,83 @@ uv venv
 uv pip install -r requirements.txt
 ```
 
-### 2. 修改配置
-打开 `src/plugins/auto_mute.py` 文件编辑顶部配置。
-现在支持**为不同群设置不同的监控名单和触发频率**：
+### 2. 配置管理 (WebUI)
 
-```python
-GROUP_CONFIGS = {
-    # === 群号 111222 ===
-    111222: {
-        # 该群的监控名单（刷屏的人）
-        "target_users": [12345678, 87654321, 111111],
-        # 几句开始触发禁言（默认5句以后，即第6句开始）
-        "threshold": 5,
-        # 定时禁言配置
-        "scheduled_mute": {
-            "enabled": True,       # 是否开启定时禁言
-            "cooldown": 30,        # 冷却时间（秒）
-            "ranges": [            # 时间段列表 (HH:MM)
-                ("23:00", "07:00"), # 跨夜：晚上11点到早上7点
-                ("12:00", "13:30")  # 午休
-            ]
-        }
-    },
+本项目现已支持 **可视化 WebUI 配置面板**，无需修改代码即可管理群组、名单和策略。
 
-    # === 群号 333444 (另一个群) ===
-    333444: {
-        "target_users": [99999],
-        "threshold": 3  # 这个群严格一点，3句就禁言
-    }
-}
-```
-*注意：只有在 `GROUP_CONFIGS` 里配置了的群，机器人才会生效。*
+**启动方式**：
+启动机器人后，浏览器访问：
+> http://127.0.0.1:8080/webui
 
-你还可以调整以下参数：
+(端口默认为 8080，可在 `.env` 文件中修改 `PORT`)
 
-```python
-# 连击判定的超时时间（秒）
-COMBO_TIMEOUT = 180  # 3分钟
+**WebUI 功能**：
+*   **群组管理**：自动读取机器人所在的群列表。
+*   **名单选择**：显示群成员列表（头像+昵称），勾选即可加入监控名单。
+*   **搜索过滤**：支持通过昵称或 QQ 号搜索成员。
+*   **策略配置**：
+    *   **触发阈值**：设置多少次发言后触发禁言。
+    *   **连击超时**：设置连击计数的重置时间（默认为各群独立的 180秒）。
+    *   **定时禁言**：开关定时禁言功能，设置冷却时间。
+    *   **时间段设置**：支持按 **星期** 设置不同的禁言时间段（如周末和工作日区分）。
+*   **热重载**：保存配置后立即生效，无需重启机器人。
 
-# 阶梯式禁言时长（分钟）
-MUTE_LEVELS = [1, 2, 3, 5, 7, 10, 13, 17, 21]
+**配置文件**：
+所有配置将保存在根目录下的 `config.json` 文件中。
+
+### 3. 环境与依赖
+> **提示**：如果已执行步骤 1 中的 `uv pip install -r requirements.txt`，以下依赖已自动安装，无需重复执行。
+
+主要依赖项：
+```bash
+uv pip install nonebot2[fastapi] nonebot-adapter-onebot
 ```
 
-### 3. .env 文件作用
+### 4. .env 文件作用
 项目根目录下的 `.env` 用于配置 NoneBot 的运行参数：
 
-```
+```env
 HOST=127.0.0.1     # 监听地址
 PORT=8080          # 监听端口
 LOG_LEVEL=INFO     # 日志等级
 COMMAND_START=["/"]
+WEBUI_API_KEY=     # WebUI API 密钥（参见下方说明）
 ```
 
 如果你修改了 `HOST` / `PORT`，请同步更新 OneBot 的反向 WebSocket 地址。
 
-### 4. 连接机器人 (OneBot V11)
+#### WebUI 认证说明 (`WEBUI_API_KEY`)
+
+`WEBUI_API_KEY` 用于保护 WebUI 的 API 接口，对应代码中的 `API_KEY` 变量和 `verify_api_key` 函数。
+
+- **空值**（默认）：认证功能禁用，任何人都可以访问 API
+- **非空值**：所有 API 请求必须在 Header 中包含 `X-API-KEY: <你的密钥>`
+
+> ⚠️ **安全警告**：如果你将 `HOST` 设置为非 `127.0.0.1`（如 `0.0.0.0`）或将服务暴露到互联网，**必须**设置一个强密钥。
+
+**示例配置**：
+```bash
+# 在 .env 文件中
+WEBUI_API_KEY="your-strong-secret-key-here"
+
+# 或在 docker-compose.yml 中
+environment:
+  - WEBUI_API_KEY=your-strong-secret-key-here
+```
+
+**安全建议**：
+- 使用至少 32 位的随机字符串作为密钥
+- 不要将密钥提交到版本控制系统（使用 `.env` 并将其加入 `.gitignore`）
+- 如果密钥泄露，立即更换并重启机器人
+
+### 5. 连接机器人 (OneBot V11)
 本程序需要配合 **NapCatQQ**, **LLOneBot**, **Lagrange** 等工具使用。
 请在你的机器人工具中，添加一个 **反向 WebSocket** 连接：
 
 *   **URL**: `ws://127.0.0.1:8080/onebot/v11/ws`
 *   **Token**: (留空)
 
-### 5. 启动
+### 6. 启动
 在终端中运行：
 ```bash
 uv run bot.py
