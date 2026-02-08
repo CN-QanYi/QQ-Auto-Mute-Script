@@ -40,10 +40,67 @@ async function api(endpoint, options = {}) {
             ...options,
             headers
         });
-        return await response.json();
+
+        // Handle 401 Unauthorized - clear stored API key and notify UI
+        if (response.status === 401) {
+            localStorage.removeItem('apiKey');
+            window.dispatchEvent(new CustomEvent('api-unauthorized', {
+                detail: { endpoint, status: response.status }
+            }));
+            return {
+                success: false,
+                error: '未授权：API 密钥无效或已过期',
+                status: 401,
+                statusText: response.statusText
+            };
+        }
+
+        // Check content-type for JSON responses
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (!response.ok) {
+            // Non-OK response - try to get error details
+            if (isJson) {
+                const errorData = await response.json();
+                return {
+                    success: false,
+                    error: errorData.detail || errorData.error || response.statusText,
+                    status: response.status,
+                    statusText: response.statusText,
+                    data: errorData
+                };
+            } else {
+                const body = await response.text();
+                return {
+                    success: false,
+                    error: response.statusText || 'Request failed',
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: body
+                };
+            }
+        }
+
+        // OK response - parse JSON if applicable
+        if (isJson) {
+            return await response.json();
+        } else {
+            // Non-JSON success response
+            const body = await response.text();
+            return {
+                success: true,
+                body: body,
+                status: response.status
+            };
+        }
     } catch (error) {
         console.error('API Error:', error);
-        return { success: false, error: error.message };
+        return {
+            success: false,
+            error: error.message || 'Network error',
+            status: 0
+        };
     }
 }
 

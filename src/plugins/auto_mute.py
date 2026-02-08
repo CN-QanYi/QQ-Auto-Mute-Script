@@ -35,8 +35,9 @@ def load_config_from_file():
                     continue
                 
                 # 处理 ranges 中的数字键（星期）
-                if "scheduled_mute" in group_cfg and "ranges" in group_cfg["scheduled_mute"]:
-                    ranges = group_cfg["scheduled_mute"]["ranges"]
+                scheduled = group_cfg.get("scheduled_mute")
+                if isinstance(scheduled, dict) and "ranges" in scheduled:
+                    ranges = scheduled["ranges"]
                     if isinstance(ranges, dict):
                         new_ranges = {}
                         for key, value in ranges.items():

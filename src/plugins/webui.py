@@ -58,10 +58,6 @@ class GroupConfig(BaseModel):
     scheduled_mute: ScheduledMuteConfig = ScheduledMuteConfig()
 
 
-class ConfigData(BaseModel):
-    __root__: Dict[str, GroupConfig]
-
-
 # === 配置文件操作 ===
 def load_config() -> Dict[str, Any]:
     """加载配置文件"""
