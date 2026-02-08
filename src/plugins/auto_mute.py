@@ -57,7 +57,13 @@ def load_config_from_file():
             print(f"加载配置失败: {e}")
             return {}
     else:
-        print(f"配置文件不存在: {CONFIG_PATH}")
+        print(f"配置文件不存在: {CONFIG_PATH}，正在创建默认配置...")
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump({}, f, ensure_ascii=False, indent=4)
+            print(f"已创建空配置文件: {CONFIG_PATH}")
+        except Exception as e:
+            print(f"创建配置文件失败: {e}")
         return {}
 
 # 全局配置变量

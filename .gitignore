@@ -18,6 +18,9 @@ ENV/
 # Logs
 *.log
 
+# User configuration (copy from config.example.json)
+config.json
+
 # OS files
 .DS_Store
 Thumbs.db

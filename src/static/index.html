@@ -105,7 +105,12 @@
                     </h3>
                     <div class="toggle-wrapper">
                         <span style="color: var(--text-secondary); font-size: 0.85rem;">启用</span>
-                        <div class="toggle" id="scheduledMuteToggle" onclick="toggleScheduledMute()"></div>
+                        <div class="toggle" id="scheduledMuteToggle" 
+                             tabindex="0" 
+                             role="switch" 
+                             aria-checked="false"
+                             onclick="toggleScheduledMute()"
+                             onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleScheduledMute(); }"></div>
                     </div>
                 </div>
                 <div class="card-body">

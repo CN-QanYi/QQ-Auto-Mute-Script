@@ -24,9 +24,21 @@ document.addEventListener('DOMContentLoaded', () => {
 // === API 调用 ===
 async function api(endpoint, options = {}) {
     try {
+        // Build headers with Content-Type and optional API key
+        const headers = {
+            'Content-Type': 'application/json',
+            ...options.headers
+        };
+
+        // Add X-API-KEY header if API key is stored in localStorage
+        const apiKey = localStorage.getItem('apiKey');
+        if (apiKey) {
+            headers['X-API-KEY'] = apiKey;
+        }
+
         const response = await fetch(endpoint, {
-            headers: { 'Content-Type': 'application/json' },
-            ...options
+            ...options,
+            headers
         });
         return await response.json();
     } catch (error) {
@@ -239,7 +251,9 @@ function loadGroupConfig(groupId) {
 
     // 定时禁言开关
     const toggle = document.getElementById('scheduledMuteToggle');
-    toggle.classList.toggle('active', groupConfig.scheduled_mute?.enabled || false);
+    const isEnabled = groupConfig.scheduled_mute?.enabled || false;
+    toggle.classList.toggle('active', isEnabled);
+    toggle.setAttribute('aria-checked', isEnabled.toString());
 
     // 渲染时间段
     selectedDay = 'default';
@@ -417,6 +431,9 @@ function ensureGroupConfig() {
 function toggleScheduledMute() {
     const toggle = document.getElementById('scheduledMuteToggle');
     toggle.classList.toggle('active');
+    // Update aria-checked for accessibility
+    const isActive = toggle.classList.contains('active');
+    toggle.setAttribute('aria-checked', isActive.toString());
 }
 
 function updateStatus(connected) {

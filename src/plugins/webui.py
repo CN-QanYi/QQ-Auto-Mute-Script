@@ -208,13 +208,23 @@ async def update_group_config(group_id: str, group_config: Dict[str, Any], autho
     config = load_config()
     config[group_id] = validated_group.dict()
     if save_config(config):
+        # 通知 auto_mute 插件重新加载配置
+        reload_ok = True
+        reload_err = None
         try:
             from src.plugins.auto_mute import reload_config
             reload_config()
         except Exception as e:
+            reload_ok = False
+            reload_err = str(e)
             logger.error(f"重新加载配置失败: {e}")
-        return {"success": True, "message": f"群 {group_id} 配置已保存"}
-    return {"success": False, "error": "保存失败"}
+        return {
+            "success": True,
+            "message": f"群 {group_id} 配置已保存",
+            "reload_ok": reload_ok,
+            "reload_error": reload_err
+        }
+    return {"success": False, "error": "保存失败", "reload_ok": False, "reload_error": None}
 
 
 @app.delete("/api/config/{group_id}")

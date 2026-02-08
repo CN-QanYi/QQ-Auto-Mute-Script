@@ -1,0 +1,22 @@
+{
+    "123456789": {
+        "target_users": [
+            111111111,
+            222222222
+        ],
+        "threshold": 5,
+        "combo_timeout": 180,
+        "scheduled_mute": {
+            "enabled": false,
+            "cooldown": 30,
+            "ranges": {
+                "default": [
+                    [
+                        "23:00",
+                        "07:00"
+                    ]
+                ]
+            }
+        }
+    }
+}
