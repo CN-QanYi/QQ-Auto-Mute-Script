@@ -433,6 +433,25 @@ function removeTimeRange(index) {
 }
 
 // === 保存配置 ===
+// 配置值范围常量
+const CONFIG_LIMITS = {
+    threshold: { min: 0, max: 100, default: 5, label: '触发阈值' },
+    combo_timeout: { min: 1, max: 3600, default: 180, label: '连击超时' },
+    cooldown: { min: 1, max: 3600, default: 30, label: '冷却时间' }
+};
+
+function validateAndClamp(value, limits) {
+    // 如果是 NaN，返回默认值
+    if (Number.isNaN(value)) {
+        return { valid: true, value: limits.default, clamped: false };
+    }
+    // 检查范围
+    if (value < limits.min || value > limits.max) {
+        return { valid: false, value: value, min: limits.min, max: limits.max };
+    }
+    return { valid: true, value: value, clamped: false };
+}
+
 async function saveConfig() {
     if (!currentGroupId) {
         showToast('请先选择一个群', 'error');
@@ -441,14 +460,38 @@ async function saveConfig() {
 
     ensureGroupConfig();
 
-    // 收集表单数据（使用 nullish coalescing 处理 0 值）
+    // 解析表单数据
     const parsedThreshold = parseInt(document.getElementById('threshold').value);
     const parsedTimeout = parseInt(document.getElementById('comboTimeout').value);
     const parsedCooldown = parseInt(document.getElementById('cooldown').value);
 
-    config[currentGroupId].threshold = Number.isNaN(parsedThreshold) ? 5 : parsedThreshold;
-    config[currentGroupId].combo_timeout = Number.isNaN(parsedTimeout) ? 180 : parsedTimeout;
-    config[currentGroupId].scheduled_mute.cooldown = Number.isNaN(parsedCooldown) ? 30 : parsedCooldown;
+    // 验证并获取有效值
+    const thresholdResult = validateAndClamp(parsedThreshold, CONFIG_LIMITS.threshold);
+    const timeoutResult = validateAndClamp(parsedTimeout, CONFIG_LIMITS.combo_timeout);
+    const cooldownResult = validateAndClamp(parsedCooldown, CONFIG_LIMITS.cooldown);
+
+    // 收集验证错误
+    const errors = [];
+    if (!thresholdResult.valid) {
+        errors.push(`${CONFIG_LIMITS.threshold.label}必须在 ${thresholdResult.min}-${thresholdResult.max} 之间`);
+    }
+    if (!timeoutResult.valid) {
+        errors.push(`${CONFIG_LIMITS.combo_timeout.label}必须在 ${timeoutResult.min}-${timeoutResult.max} 秒之间`);
+    }
+    if (!cooldownResult.valid) {
+        errors.push(`${CONFIG_LIMITS.cooldown.label}必须在 ${cooldownResult.min}-${cooldownResult.max} 秒之间`);
+    }
+
+    // 如果有验证错误，显示提示并中止保存
+    if (errors.length > 0) {
+        showToast(errors.join('；'), 'error');
+        return;
+    }
+
+    // 使用验证后的值更新配置
+    config[currentGroupId].threshold = thresholdResult.value;
+    config[currentGroupId].combo_timeout = timeoutResult.value;
+    config[currentGroupId].scheduled_mute.cooldown = cooldownResult.value;
     config[currentGroupId].scheduled_mute.enabled = document.getElementById('scheduledMuteToggle').classList.contains('active');
 
     const result = await api(`/api/config/${currentGroupId}`, {
