@@ -52,7 +52,9 @@ uv pip install -r requirements.txt
 所有配置将保存在根目录下的 `config.json` 文件中。
 
 ### 3. 环境与依赖
-确保安装了必要的依赖项：
+> **提示**：如果已执行步骤 1 中的 `uv pip install -r requirements.txt`，以下依赖已自动安装，无需重复执行。
+
+主要依赖项：
 ```bash
 uv pip install nonebot2[fastapi] nonebot-adapter-onebot
 ```
@@ -60,7 +62,7 @@ uv pip install nonebot2[fastapi] nonebot-adapter-onebot
 ### 4. .env 文件作用
 项目根目录下的 `.env` 用于配置 NoneBot 的运行参数：
 
-```
+```env
 HOST=127.0.0.1     # 监听地址
 PORT=8080          # 监听端口
 LOG_LEVEL=INFO     # 日志等级

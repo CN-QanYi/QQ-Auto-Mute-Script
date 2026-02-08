@@ -1,3 +1,4 @@
+import hmac
 import json
 import os
 import tempfile
@@ -39,7 +40,7 @@ async def verify_api_key(x_api_key: Optional[str] = Header(None)):
     if not API_KEY:
         return True
     
-    if not x_api_key or x_api_key != API_KEY:
+    if not x_api_key or not hmac.compare_digest(x_api_key, API_KEY):
         raise HTTPException(status_code=401, detail="未授权：无效的 API 密钥")
     return True
 
@@ -193,6 +194,8 @@ async def update_config(config: Dict[str, Any], authorized: bool = Depends(verif
 
 @app.post("/api/config/{group_id}")
 async def update_group_config(group_id: str, group_config: Dict[str, Any], authorized: bool = Depends(verify_api_key)):
+    # 注意：此处存在 TOCTOU 竞态条件（load_config -> 修改 -> save_config 期间可能被并发请求覆盖）
+    # 对于单用户管理面板场景影响有限；若需支持多用户并发，建议引入文件锁
     """更新单个群的配置（带验证）"""
     # 验证群配置
     try:

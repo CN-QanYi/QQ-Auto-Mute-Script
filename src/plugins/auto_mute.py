@@ -1,11 +1,15 @@
 import time
 import math
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from collections import deque, defaultdict
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
+
+# 日志配置
+logger = logging.getLogger(__name__)
 
 # === 配置文件路径 ===
 CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
@@ -31,7 +35,7 @@ def load_config_from_file():
                 try:
                     group_id = int(group_id_str)
                 except (ValueError, TypeError):
-                    print(f"警告: 无效的群号 '{group_id_str}'，已跳过该配置")
+                    logger.warning(f"无效的群号 '{group_id_str}'，已跳过该配置")
                     continue
                 
                 # 处理 ranges 中的数字键（星期）
@@ -52,19 +56,19 @@ def load_config_from_file():
                 
                 config[group_id] = group_cfg
             
-            print(f"已从 {CONFIG_PATH} 加载配置，共 {len(config)} 个群")
+            logger.info(f"已从 {CONFIG_PATH} 加载配置，共 {len(config)} 个群")
             return config
         except Exception as e:
-            print(f"加载配置失败: {e}")
+            logger.error(f"加载配置失败: {e}")
             return {}
     else:
-        print(f"配置文件不存在: {CONFIG_PATH}，正在创建默认配置...")
+        logger.info(f"配置文件不存在: {CONFIG_PATH}，正在创建默认配置...")
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump({}, f, ensure_ascii=False, indent=4)
-            print(f"已创建空配置文件: {CONFIG_PATH}")
+            logger.info(f"已创建空配置文件: {CONFIG_PATH}")
         except Exception as e:
-            print(f"创建配置文件失败: {e}")
+            logger.error(f"创建配置文件失败: {e}")
         return {}
 
 # 全局配置变量
@@ -74,7 +78,7 @@ def reload_config():
     """重新加载配置（供 WebUI 调用）"""
     global GROUP_CONFIGS
     GROUP_CONFIGS = load_config_from_file()
-    print("配置已重新加载")
+    logger.info("配置已重新加载")
 # ===============
 
 # 全局状态变量 (使用 defaultdict 自动处理新群)
@@ -135,7 +139,7 @@ def check_scheduled_mute(current_dt, ranges_config):
         end_time = parse_time(end_str)
 
         if start_time is None or end_time is None:
-            print(f"Skipping invalid time range: {start_str} - {end_str}")
+            logger.warning(f"Skipping invalid time range: {start_str} - {end_str}")
             continue
 
         start_h, start_m = start_time
@@ -185,8 +189,8 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
         return # Not monitored
 
     config = GROUP_CONFIGS[group_id]
-    target_users = config["target_users"]
-    threshold = config["threshold"]
+    target_users = config.get("target_users", [])
+    threshold = config.get("threshold", 5)
 
     user_id = event.user_id
     current_time = time.time()
@@ -205,7 +209,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
             last_enforce = group_last_schedule_enforcement_times[group_id]
             
             if current_time - last_enforce > cooldown:
-                print(f"群 {group_id} 触发定时禁言，冷却已就绪。剩余时长: {duration}秒")
+                logger.info(f"群 {group_id} 触发定时禁言，冷却已就绪。剩余时长: {duration}秒")
                 # 对名单内所有用户执行禁言
                 for target_uid in target_users:
                     try:
@@ -215,7 +219,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
                             duration=int(duration)
                         )
                     except Exception as e:
-                        print(f"定时禁言执行失败 (User {target_uid}): {e}")
+                        logger.error(f"定时禁言执行失败 (User {target_uid}): {e}")
                 
                 # 更新最后执行时间
                 group_last_schedule_enforcement_times[group_id] = current_time
@@ -227,7 +231,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
     if user_id not in target_users:
         # 只要有非名单用户发言，直接重置该群的连击
         if group_combo_counts[group_id] > 0:
-            print(f"群 {group_id} 非名单用户 {user_id} 发言，打断连击。")
+            logger.debug(f"群 {group_id} 非名单用户 {user_id} 发言，打断连击。")
             group_combo_counts[group_id] = 0
             group_last_activity_times[group_id] = 0
         return
@@ -238,7 +242,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
     combo_timeout = config.get("combo_timeout", DEFAULT_COMBO_TIMEOUT)
     last_time = group_last_activity_times[group_id]
     if last_time > 0 and (current_time - last_time > combo_timeout):
-        print(f"群 {group_id} 名单用户发言间隔超过 {combo_timeout} 秒，重置连击计数。")
+        logger.debug(f"群 {group_id} 名单用户发言间隔超过 {combo_timeout} 秒，重置连击计数。")
         group_combo_counts[group_id] = 0
 
     # 更新状态
@@ -274,7 +278,7 @@ async def handle_msg(bot: Bot, event: GroupMessageEvent):
             )
             
             # 记录日志
-            print(f"触发第 {current_level} 级连击禁言：{mute_minutes} 分钟。")
+            logger.info(f"触发第 {current_level} 级连击禁言：{mute_minutes} 分钟。")
             
         except Exception as e:
-            print(f"禁言失败: {e}")
+            logger.error(f"禁言失败: {e}")

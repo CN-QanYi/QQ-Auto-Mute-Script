@@ -636,7 +636,13 @@ body {
     to { transform: rotate(360deg); }
 }
 
-/* Scrollbar */
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) var(--bg-primary);
+}
+
+/* Webkit scrollbar */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;

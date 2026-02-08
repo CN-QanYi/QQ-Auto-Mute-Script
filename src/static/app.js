@@ -15,6 +15,18 @@ const DAYS = [
     { key: 6, label: '周日' }
 ];
 
+// 默认群配置（共享常量，避免重复定义）
+const DEFAULT_GROUP_CONFIG = {
+    target_users: [],
+    threshold: 5,
+    combo_timeout: 180,
+    scheduled_mute: {
+        enabled: false,
+        cooldown: 30,
+        ranges: { default: [] }
+    }
+};
+
 // === 初始化 ===
 document.addEventListener('DOMContentLoaded', async () => {
     // 先加载群列表，确保 DOM 元素存在后再加载配置
@@ -295,16 +307,7 @@ async function loadConfig() {
 }
 
 function loadGroupConfig(groupId) {
-    const groupConfig = config[groupId] || {
-        target_users: [],
-        threshold: 5,
-        combo_timeout: 180,
-        scheduled_mute: {
-            enabled: false,
-            cooldown: 30,
-            ranges: { default: [] }
-        }
-    };
+    const groupConfig = config[groupId] || JSON.parse(JSON.stringify(DEFAULT_GROUP_CONFIG));
 
     // 填充表单（使用 ?? 保留合法的 0 值）
     document.getElementById('threshold').value = String(groupConfig.threshold ?? 5);
@@ -538,16 +541,7 @@ async function deleteConfig() {
 // === 工具函数 ===
 function ensureGroupConfig() {
     if (!config[currentGroupId]) {
-        config[currentGroupId] = {
-            target_users: [],
-            threshold: 5,
-            combo_timeout: 180,
-            scheduled_mute: {
-                enabled: false,
-                cooldown: 30,
-                ranges: { default: [] }
-            }
-        };
+        config[currentGroupId] = JSON.parse(JSON.stringify(DEFAULT_GROUP_CONFIG));
     }
     if (!config[currentGroupId].scheduled_mute) {
         config[currentGroupId].scheduled_mute = {
