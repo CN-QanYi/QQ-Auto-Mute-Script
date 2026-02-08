@@ -16,9 +16,10 @@ const DAYS = [
 ];
 
 // === 初始化 ===
-document.addEventListener('DOMContentLoaded', () => {
-    loadGroups();
-    loadConfig();
+document.addEventListener('DOMContentLoaded', async () => {
+    // 先加载群列表，确保 DOM 元素存在后再加载配置
+    await loadGroups();
+    await loadConfig();
 });
 
 // === 认证失败处理 ===
@@ -226,12 +227,13 @@ function renderMembers(filter = '') {
     container.innerHTML = filtered.map(m => {
         const isSelected = targetUsers.includes(m.user_id);
         const displayName = m.card || m.nickname || '未知';
+        const safeAvatar = escapeHtml(m.avatar || '');
         return `
             <div class="member-item ${isSelected ? 'selected' : ''}" 
                  data-id="${m.user_id}" 
                  onclick="toggleMember(${m.user_id})">
                 <img class="member-avatar" 
-                     src="${m.avatar}" 
+                     src="${safeAvatar}" 
                      alt="${escapeHtml(displayName)}"
                      onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%2330363d%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%238b949e%22 font-size=%2240%22>👤</text></svg>'">
                 <div class="member-info">
@@ -425,10 +427,14 @@ async function saveConfig() {
 
     ensureGroupConfig();
 
-    // 收集表单数据
-    config[currentGroupId].threshold = parseInt(document.getElementById('threshold').value) || 5;
-    config[currentGroupId].combo_timeout = parseInt(document.getElementById('comboTimeout').value) || 180;
-    config[currentGroupId].scheduled_mute.cooldown = parseInt(document.getElementById('cooldown').value) || 30;
+    // 收集表单数据（使用 nullish coalescing 处理 0 值）
+    const parsedThreshold = parseInt(document.getElementById('threshold').value);
+    const parsedTimeout = parseInt(document.getElementById('comboTimeout').value);
+    const parsedCooldown = parseInt(document.getElementById('cooldown').value);
+
+    config[currentGroupId].threshold = Number.isNaN(parsedThreshold) ? 5 : parsedThreshold;
+    config[currentGroupId].combo_timeout = Number.isNaN(parsedTimeout) ? 180 : parsedTimeout;
+    config[currentGroupId].scheduled_mute.cooldown = Number.isNaN(parsedCooldown) ? 30 : parsedCooldown;
     config[currentGroupId].scheduled_mute.enabled = document.getElementById('scheduledMuteToggle').classList.contains('active');
 
     const result = await api(`/api/config/${currentGroupId}`, {
