@@ -21,6 +21,19 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
 });
 
+// === 认证失败处理 ===
+window.addEventListener('api-unauthorized', (event) => {
+    console.warn('API 认证失败:', event.detail);
+
+    const newKey = prompt('API 密钥无效或已过期，请重新输入 API 密钥：');
+    if (newKey && newKey.trim()) {
+        localStorage.setItem('apiKey', newKey.trim());
+        location.reload();
+    } else {
+        showToast('未输入 API 密钥，部分功能可能不可用', 'error');
+    }
+});
+
 // === API 调用 ===
 async function api(endpoint, options = {}) {
     try {
