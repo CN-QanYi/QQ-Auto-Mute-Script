@@ -353,6 +353,9 @@ function renderTimeRanges() {
     const ranges = groupConfig.scheduled_mute?.ranges || {};
     const dayRanges = ranges[selectedDay] || [];
 
+    // 清空容器
+    container.innerHTML = '';
+
     if (dayRanges.length === 0) {
         container.innerHTML = `
             <div class="empty-state" style="padding: 20px;">
@@ -360,14 +363,35 @@ function renderTimeRanges() {
             </div>
         `;
     } else {
-        container.innerHTML = dayRanges.map((r, i) => `
-            <div class="time-range-item">
-                <input type="time" value="${r[0]}" onchange="updateTimeRange(${i}, 0, this.value)">
-                <span>至</span>
-                <input type="time" value="${r[1]}" onchange="updateTimeRange(${i}, 1, this.value)">
-                <button class="btn-remove" onclick="removeTimeRange(${i})">删除</button>
-            </div>
-        `).join('');
+        // 使用 DOM 方法安全构建元素，防止 XSS
+        dayRanges.forEach((r, i) => {
+            const item = document.createElement('div');
+            item.className = 'time-range-item';
+
+            const startInput = document.createElement('input');
+            startInput.type = 'time';
+            startInput.value = r[0] || '';
+            startInput.addEventListener('change', () => updateTimeRange(i, 0, startInput.value));
+
+            const span = document.createElement('span');
+            span.textContent = '至';
+
+            const endInput = document.createElement('input');
+            endInput.type = 'time';
+            endInput.value = r[1] || '';
+            endInput.addEventListener('change', () => updateTimeRange(i, 1, endInput.value));
+
+            const btn = document.createElement('button');
+            btn.className = 'btn-remove';
+            btn.textContent = '删除';
+            btn.addEventListener('click', () => removeTimeRange(i));
+
+            item.appendChild(startInput);
+            item.appendChild(span);
+            item.appendChild(endInput);
+            item.appendChild(btn);
+            container.appendChild(item);
+        });
     }
 }
 
