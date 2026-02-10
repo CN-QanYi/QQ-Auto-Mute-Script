@@ -3,14 +3,16 @@ import json
 import os
 import tempfile
 import logging
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from functools import wraps
 
-from nonebot import get_driver, get_bot, on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
-from fastapi import FastAPI, HTTPException, Depends, Request, Header
-from fastapi.responses import HTMLResponse, FileResponse
+from nonebot import get_driver, get_bot
+from nonebot.adapters.onebot.v11 import Bot
+from fastapi import FastAPI, HTTPException, Depends, Request, Header, Query
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,13 +26,18 @@ STATIC_PATH = Path(__file__).parent.parent / "static"
 # API 密钥（从环境变量获取，默认为空字符串表示禁用认证）
 API_KEY = os.environ.get("WEBUI_API_KEY", "")
 
-# 获取 FastAPI 应用
+# WebUI 独立端口（从环境变量获取，默认 9090）
+WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "9090"))
+
+# 获取 NoneBot 驱动（用于生命周期钩子）
 driver = get_driver()
-app: FastAPI = driver.server_app
+
+# 创建独立的 WebUI FastAPI 应用
+webui_app = FastAPI(title="QQ Auto Mute WebUI")
 
 # 挂载静态文件
 if STATIC_PATH.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
+    webui_app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 
 
 # === 认证依赖 ===
@@ -96,17 +103,28 @@ def save_config(config: Dict[str, Any]) -> bool:
         return False
 
 
-# === API 路由 ===
-@app.get("/webui", response_class=HTMLResponse)
+# === API 路由（注册到独立的 webui_app）===
+@webui_app.get("/", response_class=HTMLResponse)
 async def webui_page():
-    """返回 WebUI 页面"""
+    """返回 WebUI 页面（根路径直接访问）"""
     html_path = STATIC_PATH / "index.html"
     if html_path.exists():
         return FileResponse(html_path, media_type="text/html")
     return HTMLResponse("<h1>WebUI 文件不存在</h1>", status_code=404)
 
 
-@app.get("/api/groups")
+@webui_app.get("/api/bot/info")
+async def get_bot_info(authorized: bool = Depends(verify_api_key)):
+    """获取机器人自身信息（QQ号）"""
+    try:
+        bot: Bot = get_bot()
+        return {"success": True, "data": {"user_id": int(bot.self_id)}}
+    except Exception as e:
+        logger.error(f"获取机器人信息失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@webui_app.get("/api/groups")
 async def get_groups(authorized: bool = Depends(verify_api_key)):
     """获取机器人所在的群列表"""
     try:
@@ -128,11 +146,12 @@ async def get_groups(authorized: bool = Depends(verify_api_key)):
         return {"success": False, "error": str(e)}
 
 
-@app.get("/api/groups/{group_id}/members")
+@webui_app.get("/api/groups/{group_id}/members")
 async def get_group_members(group_id: int, authorized: bool = Depends(verify_api_key)):
-    """获取群成员列表（头像+昵称+QQ号）"""
+    """获取群成员列表（头像+昵称+QQ号），自动排除机器人自身"""
     try:
         bot: Bot = get_bot()
+        self_id = int(bot.self_id)
         member_list = await bot.get_group_member_list(group_id=group_id)
         return {
             "success": True,
@@ -144,6 +163,7 @@ async def get_group_members(group_id: int, authorized: bool = Depends(verify_api
                     "avatar": f"https://q1.qlogo.cn/g?b=qq&nk={m['user_id']}&s=100"
                 }
                 for m in member_list
+                if m["user_id"] != self_id
             ]
         }
     except Exception as e:
@@ -151,14 +171,14 @@ async def get_group_members(group_id: int, authorized: bool = Depends(verify_api
         return {"success": False, "error": str(e)}
 
 
-@app.get("/api/config")
+@webui_app.get("/api/config")
 async def get_config(authorized: bool = Depends(verify_api_key)):
     """获取当前配置"""
     config = load_config()
     return {"success": True, "data": config}
 
 
-@app.post("/api/config")
+@webui_app.post("/api/config")
 async def update_config(config: Dict[str, Any], authorized: bool = Depends(verify_api_key)):
     """保存配置（带验证）"""
     # 验证配置结构
@@ -192,7 +212,7 @@ async def update_config(config: Dict[str, Any], authorized: bool = Depends(verif
     return {"success": False, "error": "保存失败"}
 
 
-@app.post("/api/config/{group_id}")
+@webui_app.post("/api/config/{group_id}")
 async def update_group_config(group_id: str, group_config: Dict[str, Any], authorized: bool = Depends(verify_api_key)):
     # 注意：此处存在 TOCTOU 竞态条件（load_config -> 修改 -> save_config 期间可能被并发请求覆盖）
     # 对于单用户管理面板场景影响有限；若需支持多用户并发，建议引入文件锁
@@ -226,7 +246,7 @@ async def update_group_config(group_id: str, group_config: Dict[str, Any], autho
     return {"success": False, "error": "保存失败", "reload_ok": False, "reload_error": None}
 
 
-@app.delete("/api/config/{group_id}")
+@webui_app.delete("/api/config/{group_id}")
 async def delete_group_config(group_id: str, authorized: bool = Depends(verify_api_key)):
     """删除群配置"""
     config = load_config()
@@ -250,3 +270,104 @@ async def delete_group_config(group_id: str, authorized: bool = Depends(verify_a
         logger.error(f"重新加载配置失败: {e}")
     
     return {"success": True, "message": f"群 {group_id} 配置已删除"}
+
+
+# === 配置导入导出 ===
+@webui_app.get("/api/config/export")
+async def export_all_config(authorized: bool = Depends(verify_api_key)):
+    """导出全量配置为 JSON 文件下载"""
+    config = load_config()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"config_全量_{timestamp}.json"
+    content = json.dumps(config, ensure_ascii=False, indent=4)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+
+@webui_app.get("/api/config/export/{group_id}")
+async def export_group_config(group_id: str, authorized: bool = Depends(verify_api_key)):
+    """导出单个群的配置为 JSON 文件下载"""
+    config = load_config()
+    if group_id not in config:
+        return {"success": False, "error": f"群 {group_id} 的配置不存在"}
+
+    # 保持与全量配置一致的结构: { "群号": { ... } }
+    single = {group_id: config[group_id]}
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"config_{group_id}_{timestamp}.json"
+    content = json.dumps(single, ensure_ascii=False, indent=4)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+
+@webui_app.post("/api/config/import")
+async def import_config(
+    incoming: Dict[str, Any],
+    mode: str = Query("merge", regex="^(merge|overwrite)$"),
+    authorized: bool = Depends(verify_api_key)
+):
+    """导入配置（支持合并或覆盖模式）"""
+    # 验证每个群配置
+    try:
+        validated = {}
+        for group_id, group_cfg in incoming.items():
+            validated_group = GroupConfig(**group_cfg)
+            validated[group_id] = validated_group.dict()
+    except Exception as e:
+        logger.error(f"导入配置验证失败: {e}")
+        return {"success": False, "error": f"配置验证失败: {str(e)}"}
+
+    if mode == "merge":
+        # 合并模式：保留现有配置，用导入的覆盖同名群
+        existing = load_config()
+        existing.update(validated)
+        final_config = existing
+    else:
+        # 覆盖模式：完全替换
+        final_config = validated
+
+    if not save_config(final_config):
+        return {"success": False, "error": "保存失败"}
+
+    # 热重载
+    reload_ok = True
+    reload_err = None
+    try:
+        from src.plugins.auto_mute import reload_config
+        reload_config()
+    except Exception as e:
+        reload_ok = False
+        reload_err = str(e)
+        logger.error(f"重新加载配置失败: {e}")
+
+    imported_count = len(validated)
+    return {
+        "success": True,
+        "message": f"已导入 {imported_count} 个群配置（模式: {'合并' if mode == 'merge' else '覆盖'}）",
+        "reload_ok": reload_ok,
+        "reload_error": reload_err
+    }
+
+
+# === 独立 WebUI 服务器启动 ===
+@driver.on_startup
+async def start_webui_server():
+    """在 NoneBot 启动时，以后台线程启动独立的 WebUI 服务器"""
+    import uvicorn
+
+    config = uvicorn.Config(
+        webui_app,
+        host="0.0.0.0",
+        port=WEBUI_PORT,
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    logger.info(f"WebUI 已启动: http://localhost:{WEBUI_PORT}/")

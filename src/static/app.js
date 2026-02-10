@@ -3,6 +3,9 @@ let currentGroupId = null;
 let groupMembers = [];
 let config = {};
 let selectedDay = 'default';
+let botUserId = null;          // 机器人自身 QQ 号
+let groupNameMap = {};         // 群号 → 群名映射
+let groupSavedState = {};      // 群号 → 是否已保存到服务端
 
 const DAYS = [
     { key: 'default', label: '默认' },
@@ -29,6 +32,8 @@ const DEFAULT_GROUP_CONFIG = {
 
 // === 初始化 ===
 document.addEventListener('DOMContentLoaded', async () => {
+    // 获取机器人自身信息
+    await loadBotInfo();
     // 先加载群列表，确保 DOM 元素存在后再加载配置
     await loadGroups();
     await loadConfig();
@@ -130,6 +135,14 @@ async function api(endpoint, options = {}) {
     }
 }
 
+// === 获取机器人信息 ===
+async function loadBotInfo() {
+    const result = await api('/api/bot/info');
+    if (result.success && result.data) {
+        botUserId = result.data.user_id;
+    }
+}
+
 // === 群列表 ===
 async function loadGroups() {
     const container = document.getElementById('groupList');
@@ -139,6 +152,11 @@ async function loadGroups() {
 
     if (result.success) {
         updateStatus(true);
+        // 建立群名映射
+        groupNameMap = {};
+        result.data.forEach(g => {
+            groupNameMap[g.group_id] = g.group_name;
+        });
         renderGroups(result.data);
     } else {
         updateStatus(false);
@@ -222,9 +240,15 @@ function renderMembers(filter = '') {
     const targetUsers = groupConfig.target_users || [];
 
     let filtered = groupMembers;
+
+    // 前端防御：过滤机器人自身 QQ
+    if (botUserId) {
+        filtered = filtered.filter(m => m.user_id !== botUserId);
+    }
+
     if (filter) {
         const lowerFilter = filter.toLowerCase();
-        filtered = groupMembers.filter(m =>
+        filtered = filtered.filter(m =>
             m.nickname.toLowerCase().includes(lowerFilter) ||
             m.card.toLowerCase().includes(lowerFilter) ||
             String(m.user_id).includes(filter)
@@ -294,6 +318,11 @@ async function loadConfig() {
     const result = await api('/api/config');
     if (result.success) {
         config = result.data;
+        // 标记服务端已有的群配置为已保存
+        groupSavedState = {};
+        for (const groupId of Object.keys(config)) {
+            groupSavedState[groupId] = true;
+        }
         // 刷新群列表显示已配置标记
         const groups = document.querySelectorAll('.group-item');
         groups.forEach(g => {
@@ -504,6 +533,8 @@ async function saveConfig() {
 
     if (result.success) {
         showToast('配置已保存', 'success');
+        // 标记该群为已保存
+        groupSavedState[currentGroupId] = true;
         // 更新群列表中的已配置标记
         const groupItem = document.querySelector(`.group-item[data-id="${currentGroupId}"]`);
         if (groupItem && !groupItem.querySelector('.configured-badge')) {
@@ -523,6 +554,7 @@ async function deleteConfig() {
 
     if (result.success) {
         delete config[currentGroupId];
+        delete groupSavedState[currentGroupId];
         showToast('配置已删除', 'success');
 
         // 移除已配置标记
@@ -606,6 +638,165 @@ function showToast(message, type = 'success') {
         toast.style.opacity = '0';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// === 配置导入导出 ===
+function triggerDownload(content, filename) {
+    const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// === 批量导出 ===
+function openBatchExportModal() {
+    // 收集已保存的群配置
+    const savedGroups = Object.keys(config).filter(gid => groupSavedState[gid]);
+
+    if (savedGroups.length === 0) {
+        showToast('当前没有已保存的群配置可导出', 'error');
+        return;
+    }
+
+    const overlay = document.getElementById('batchExportModal');
+    const listContainer = document.getElementById('exportGroupList');
+
+    // 渲染群列表
+    listContainer.innerHTML = savedGroups.map(gid => {
+        const name = escapeHtml(groupNameMap[gid] || '未知群聊');
+        return `
+            <label class="export-group-item" data-gid="${gid}">
+                <input type="checkbox" checked value="${gid}">
+                <div class="export-group-info">
+                    <span class="export-group-name">${name}</span>
+                    <span class="export-group-id">${gid}</span>
+                </div>
+            </label>
+        `;
+    }).join('');
+
+    overlay.style.display = 'flex';
+}
+
+function closeBatchExportModal() {
+    document.getElementById('batchExportModal').style.display = 'none';
+}
+
+function toggleAllExportGroups() {
+    const checkboxes = document.querySelectorAll('#exportGroupList input[type="checkbox"]');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+}
+
+function executeBatchExport() {
+    const checkboxes = document.querySelectorAll('#exportGroupList input[type="checkbox"]:checked');
+    const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+    if (selectedIds.length === 0) {
+        showToast('请至少选择一个群', 'error');
+        return;
+    }
+
+    const exportData = {};
+    selectedIds.forEach(gid => {
+        if (config[gid]) {
+            exportData[gid] = config[gid];
+        }
+    });
+
+    const now = new Date();
+    const ts = now.getFullYear().toString()
+        + String(now.getMonth() + 1).padStart(2, '0')
+        + String(now.getDate()).padStart(2, '0') + '_'
+        + String(now.getHours()).padStart(2, '0')
+        + String(now.getMinutes()).padStart(2, '0')
+        + String(now.getSeconds()).padStart(2, '0');
+
+    const suffix = selectedIds.length === 1 ? selectedIds[0] : `批量${selectedIds.length}群`;
+    const content = JSON.stringify(exportData, null, 4);
+    triggerDownload(content, `config_${suffix}_${ts}.json`);
+
+    showToast(`已导出 ${selectedIds.length} 个群的配置`, 'success');
+    closeBatchExportModal();
+}
+
+function importConfig() {
+    const fileInput = document.getElementById('configFileInput');
+    fileInput.value = '';
+    fileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // 读取文件
+        let text;
+        try {
+            text = await file.text();
+        } catch (err) {
+            showToast('读取文件失败', 'error');
+            return;
+        }
+
+        // 解析 JSON
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        } catch (err) {
+            showToast('文件不是有效的 JSON 格式', 'error');
+            return;
+        }
+
+        // 基本结构校验
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+            showToast('配置格式错误：应为 { "群号": { ... } } 结构', 'error');
+            return;
+        }
+
+        const groupCount = Object.keys(parsed).length;
+        if (groupCount === 0) {
+            showToast('配置文件为空，没有可导入的群配置', 'error');
+            return;
+        }
+
+        // 选择导入模式
+        const mode = confirm(
+            `即将导入 ${groupCount} 个群的配置。\n\n` +
+            `点击「确定」= 合并模式（保留现有配置，仅覆盖同名群）\n` +
+            `点击「取消」= 取消导入`
+        );
+        if (!mode) return;
+
+        // 是否覆盖
+        const overwrite = confirm(
+            '是否使用覆盖模式？\n\n' +
+            '点击「确定」= 覆盖（删除所有现有配置，仅保留导入的内容）\n' +
+            '点击「取消」= 合并（推荐，保留未涉及群的配置）'
+        );
+
+        const importMode = overwrite ? 'overwrite' : 'merge';
+
+        const result = await api(`/api/config/import?mode=${importMode}`, {
+            method: 'POST',
+            body: JSON.stringify(parsed)
+        });
+
+        if (result.success) {
+            showToast(result.message || '导入成功', 'success');
+            // 刷新配置
+            await loadConfig();
+            if (currentGroupId) {
+                loadGroupConfig(currentGroupId);
+                renderMembers();
+            }
+        } else {
+            showToast('导入失败: ' + (result.error || '未知错误'), 'error');
+        }
+    };
+    fileInput.click();
 }
 
 // 搜索功能
