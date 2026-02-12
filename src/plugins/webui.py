@@ -81,18 +81,18 @@ async def broadcast_event(event_type: str, data: Any = None):
     """广播事件到所有已连接的 WebSocket 和 SSE 客户端"""
     message = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
 
-    # WebSocket 广播
+    # WebSocket 广播（快照迭代，避免并发修改）
     disconnected = set()
-    for ws in ws_clients:
+    for ws in list(ws_clients):
         try:
             await ws.send_text(message)
         except Exception:
             disconnected.add(ws)
     ws_clients.difference_update(disconnected)
 
-    # SSE 广播
+    # SSE 广播（快照迭代，避免并发修改）
     dead_queues = []
-    for q in sse_queues:
+    for q in list(sse_queues):
         try:
             q.put_nowait({"event": event_type, "data": data})
         except Exception:
@@ -280,7 +280,7 @@ async def sse_endpoint(api_key: Optional[str] = Query(None)):
                     yield f"event: {event_type}\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
                     # 心跳保活
-                    yield f": heartbeat\n\n"
+                    yield ": heartbeat\n\n"
         except asyncio.CancelledError:
             pass
         finally:
@@ -689,7 +689,11 @@ async def import_preview(
 ):
     """导入预览：解析配置、匹配群聊、检测冲突"""
     # 兼容包装格式（WebUI 导出的带 meta/configs 的文件）
+    if not isinstance(incoming, dict):
+        incoming = {}
     configs_to_validate = incoming.get("configs", incoming)
+    if not isinstance(configs_to_validate, dict):
+        configs_to_validate = {}
 
     # 1. 使用共享验证器进行深度验证和自动修正
     batch_result = validate_import_batch(configs_to_validate)
@@ -747,10 +751,11 @@ async def import_preview(
     return {
         "success": True,
         "data": {
-            "total_groups": len(incoming),
+            "total_groups": len(configs_to_validate),
             "valid_groups": len(validated),
             "validation_errors": validation_errors,
             "validation_warnings": validation_warnings,
+            "pydantic_errors": pydantic_errors,
             "match_results": match_results,
             "conflicts": conflicts,
             "stats": {

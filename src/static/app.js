@@ -306,7 +306,11 @@ const RealtimeChannel = {
 
     tryWebSocket() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = protocol + '//' + location.host + API_BASE + '/ws';
+        let wsUrl = protocol + '//' + location.host + API_BASE + '/ws';
+        const apiKey = localStorage.getItem('apiKey');
+        if (apiKey) {
+            wsUrl += (wsUrl.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(apiKey);
+        }
 
         try {
             this.ws = new WebSocket(wsUrl);
@@ -495,7 +499,7 @@ function initScrollReveal() {
         const candidates = document.querySelectorAll('.sidebar, .main-content .card');
         if (!candidates.length) return;
 
-        candidates.forEach((el) => el.classList.add('reveal'));
+        candidates.forEach((el) => { el.classList.add('reveal'); });
 
         const observer = new IntersectionObserver(
             (entries) => {
@@ -511,7 +515,7 @@ function initScrollReveal() {
             }
         );
 
-        candidates.forEach((el) => observer.observe(el));
+        candidates.forEach((el) => { observer.observe(el); });
     } catch (e) {
         console.warn('[UI] Scroll reveal init failed:', e);
     }
@@ -842,10 +846,11 @@ async function loadGroups(silent) {
         });
         renderGroups(result.data);
 
-        // 同步到 IndexedDB（标记为已同步）
+        // 同步到 IndexedDB（保留待同步状态）
         if (IDB.db) {
             for (var gid of Object.keys(config)) {
-                try { await IDB.put(gid, config[gid], false); } catch (e) { /* silent */ }
+                var isPending = groupSavedState[gid] === 'pending' || groupSavedState[gid] === false;
+                try { await IDB.put(gid, config[gid], isPending); } catch (e) { /* silent */ }
             }
         }
     } else {
@@ -1621,9 +1626,12 @@ function updateStatus(connected) {
 
 function escapeHtml(str) {
     if (!str) return '';
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
 }
 
 function showToast(message, type) {
@@ -2039,6 +2047,7 @@ function importConfig() {
 
         // 使用验证修正后的配置
         configsToImport = validation.validConfigs;
+        importParsedConfig = configsToImport;
 
         if (validation.allWarnings.length > 0) {
             console.warn('[Import] 验证警告:', validation.allWarnings);
@@ -2047,71 +2056,90 @@ function importConfig() {
             console.warn('[Import] 验证错误（已尝试修正）:', validation.allErrors);
         }
 
-        // 合并到内存中的 config
-        var applied = 0;
-        var overwritten = 0;
-        var groupIds = Object.keys(configsToImport);
-
-        for (var i = 0; i < groupIds.length; i++) {
-            var gid = groupIds[i];
-            if (config[gid]) {
-                overwritten++;
-            }
-            config[gid] = configsToImport[gid];
-            applied++;
-        }
-
-        // 持久化到 IndexedDB
-        try {
-            await IDB.bulkPut(configsToImport, true);
-        } catch (idbErr) {
-            console.warn('[IDB] Failed to persist imported config:', idbErr);
-        }
-
-        // 逐个群 POST 到后端保存（如果后端可达）
-        var serverSaved = 0;
-        var serverFailed = 0;
-        for (var j = 0; j < groupIds.length; j++) {
-            var gid2 = groupIds[j];
-            var result = await api('/api/config/' + gid2, {
-                method: 'POST',
-                body: JSON.stringify(configsToImport[gid2])
-            });
-            if (result.success) {
-                serverSaved++;
-                groupSavedState[gid2] = true;
-            } else {
-                serverFailed++;
-                groupSavedState[gid2] = 'pending';
-            }
-        }
-
-        // 刷新 UI
-        await loadGroups(true);
-        if (currentGroupId && configsToImport[currentGroupId]) {
-            loadGroupConfig(currentGroupId);
-            renderMembers();
-        }
-
-        // 高亮变更项
-        groupIds.forEach(function (gid) {
-            var el = document.querySelector('.group-item[data-id="' + gid + '"]');
-            if (el) {
-                el.classList.add('highlight-change');
-                setTimeout(function () { el.classList.remove('highlight-change'); }, 3000);
-            }
+        // 尝试调用后端预览 API
+        var previewResult = await api('/api/config/import/preview', {
+            method: 'POST',
+            body: JSON.stringify(parsed)
         });
 
-        // 构建提示消息
-        var msg = '导入完成：' + applied + ' 个群配置';
-        if (overwritten > 0) msg += '（覆盖 ' + overwritten + ' 个）';
-        if (validation.summary.fixed > 0) msg += '，修正 ' + validation.summary.fixed + ' 个字段';
-        if (serverSaved > 0) msg += '\n已保存到服务器 ' + serverSaved + ' 个';
-        if (serverFailed > 0) msg += '\n' + serverFailed + ' 个待同步（服务器不可达）';
-
-        showToast(msg, serverFailed > 0 ? 'warning' : 'success');
+        if (previewResult.success && previewResult.data) {
+            // 在线：使用服务端预览，打开预览模态框
+            importPreviewData = previewResult.data;
+            openImportPreviewModal(importPreviewData);
+        } else {
+            // 离线或预览失败：回退到本地直接合并
+            console.warn('[Import] Preview API unavailable, falling back to local merge');
+            await importFallbackLocalMerge(configsToImport, validation);
+        }
     };
     fileInput.click();
+}
+
+async function importFallbackLocalMerge(configsToImport, validation) {
+    var applied = 0;
+    var overwritten = 0;
+    var groupIds = Object.keys(configsToImport);
+
+    for (var i = 0; i < groupIds.length; i++) {
+        var gid = groupIds[i];
+        if (config[gid]) {
+            overwritten++;
+        }
+        config[gid] = configsToImport[gid];
+        applied++;
+    }
+
+    // 持久化到 IndexedDB（标记为待同步）
+    try {
+        await IDB.bulkPut(configsToImport, true);
+    } catch (idbErr) {
+        console.warn('[IDB] Failed to persist imported config:', idbErr);
+    }
+
+    // 逐个群 POST 到后端保存（如果后端可达）
+    var serverSaved = 0;
+    var serverFailed = 0;
+    for (var j = 0; j < groupIds.length; j++) {
+        var gid2 = groupIds[j];
+        var result = await api('/api/config/' + gid2, {
+            method: 'POST',
+            body: JSON.stringify(configsToImport[gid2])
+        });
+        if (result.success) {
+            serverSaved++;
+            groupSavedState[gid2] = true;
+            // 同步成功，更新 IDB 标记
+            try { await IDB.put(gid2, configsToImport[gid2], false); } catch (e) { /* silent */ }
+        } else {
+            serverFailed++;
+            groupSavedState[gid2] = 'pending';
+        }
+    }
+
+    // 刷新 UI
+    await loadGroups(true);
+    if (currentGroupId && configsToImport[currentGroupId]) {
+        loadGroupConfig(currentGroupId);
+        renderMembers();
+    }
+
+    // 高亮变更项
+    groupIds.forEach(function (gid) {
+        var el = document.querySelector('.group-item[data-id="' + gid + '"]');
+        if (el) {
+            el.classList.add('highlight-change');
+            setTimeout(function () { el.classList.remove('highlight-change'); }, 3000);
+        }
+    });
+
+    // 构建提示消息
+    var msg = '导入完成：' + applied + ' 个群配置';
+    if (overwritten > 0) msg += '（覆盖 ' + overwritten + ' 个）';
+    if (validation.summary.fixed > 0) msg += '，修正 ' + validation.summary.fixed + ' 个字段';
+    if (serverSaved > 0) msg += '\n已保存到服务器 ' + serverSaved + ' 个';
+    if (serverFailed > 0) msg += '\n' + serverFailed + ' 个待同步（服务器不可达）';
+
+    showToast(msg, serverFailed > 0 ? 'warning' : 'success');
 }
 
 // 简单哈希函数
@@ -2264,7 +2292,7 @@ async function executeImport() {
     var btn = document.getElementById('confirmImportBtn');
     btn.disabled = true;
     btn.textContent = '\u5bfc\u5165\u4e2d...';
-    showImportProgress(true, 50);
+    showImportProgress(true, 30);
 
     var mapping = {};
     document.querySelectorAll('.match-select').forEach(function (select) {
@@ -2290,6 +2318,8 @@ async function executeImport() {
 
     var mode = document.getElementById('importModeSelect').value;
 
+    showImportProgress(true, 50);
+
     var result = await api('/api/config/import?mode=' + mode, {
         method: 'POST',
         body: JSON.stringify({
@@ -2299,7 +2329,7 @@ async function executeImport() {
         })
     });
 
-    showImportProgress(true, 100);
+    showImportProgress(true, 80);
 
     if (result.success) {
         var stats = result.stats || {};
@@ -2308,16 +2338,41 @@ async function executeImport() {
             + (result.backup_name ? '\n\u5df2\u81ea\u52a8\u5907\u4efd: ' + result.backup_name : '');
         showToast(msg, 'success');
 
+        // 刷新内存配置和 UI
         await loadConfig();
         await loadGroups();
+
+        // 同步到 IndexedDB（标记已同步）
+        var appliedConfigs = result.applied_configs || importParsedConfig;
+        try {
+            await IDB.bulkPut(appliedConfigs, false);
+        } catch (idbErr) {
+            console.warn('[IDB] Failed to persist imported config:', idbErr);
+        }
+        for (var gid of Object.keys(appliedConfigs)) {
+            groupSavedState[gid] = true;
+        }
+
         if (currentGroupId) {
             loadGroupConfig(currentGroupId);
             renderMembers();
         }
 
+        showImportProgress(true, 100);
         closeImportPreviewModal();
     } else {
         showToast('\u5bfc\u5165\u5931\u8d25: ' + (result.error || '\u672a\u77e5\u9519\u8bef'), 'error');
+
+        // 导入失败：持久化到 IDB 并标记为 pending
+        try {
+            await IDB.bulkPut(importParsedConfig, true);
+        } catch (idbErr) {
+            console.warn('[IDB] Failed to persist pending config:', idbErr);
+        }
+        for (var pgid of Object.keys(importParsedConfig)) {
+            config[pgid] = importParsedConfig[pgid];
+            groupSavedState[pgid] = 'pending';
+        }
     }
 
     btn.disabled = false;

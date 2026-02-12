@@ -140,11 +140,11 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="threshold">触发阈值（第几条消息开始禁言）</label>
-                            <input type="number" id="threshold" value="5" min="1" max="100">
+                            <input type="number" id="threshold" value="5" min="0" max="100">
                         </div>
                         <div class="form-group">
                             <label for="comboTimeout">连击超时（秒）</label>
-                            <input type="number" id="comboTimeout" value="180" min="30" max="3600">
+                            <input type="number" id="comboTimeout" value="180" min="1" max="3600">
                         </div>
                     </div>
                 </div>
@@ -173,7 +173,7 @@
                     <div class="form-grid" style="margin-bottom: 20px;">
                         <div class="form-group">
                             <label for="cooldown">冷却时间（秒）</label>
-                            <input type="number" id="cooldown" value="30" min="5" max="300">
+                            <input type="number" id="cooldown" value="30" min="1" max="3600">
                         </div>
                     </div>
 
@@ -224,7 +224,7 @@
         <div class="modal">
             <div class="modal-header">
                 <h3>批量导出配置</h3>
-                <button class="modal-close" onclick="closeBatchExportModal()">&times;</button>
+                <button class="modal-close" type="button" aria-label="关闭" onclick="closeBatchExportModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="modal-hint">选择要导出的群配置：</div>
@@ -250,7 +250,7 @@
         <div class="modal import-preview-modal">
             <div class="modal-header">
                 <h3>📥 导入配置预览</h3>
-                <button class="modal-close" onclick="closeImportPreviewModal()">&times;</button>
+                <button class="modal-close" type="button" aria-label="关闭" onclick="closeImportPreviewModal()">&times;</button>
             </div>
 
             <!-- Progress Bar -->
