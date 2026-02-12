@@ -1,9 +1,8 @@
 """
 配置验证器模块
-提供配置文件导入的验证, 修正和默认值填充功能.
-可同时供后端 (webui.py) 和单元测试使用.
+提供配置文件导入的验证、修正和默认值填充功能。
+可同时供后端 (webui.py) 和单元测试使用。
 """
-# ruff: noqa: RUF001
 import re
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -74,9 +73,7 @@ class BatchValidationResult:
 
 
 def _safe_int(value: Any, default: int) -> Tuple[int, bool]:
-    """安全转换为整数, 返回 (值, 是否成功). 拒绝布尔类型."""
-    if isinstance(value, bool):
-        return default, False
+    """安全转换为整数，返回 (值, 是否成功)"""
     if isinstance(value, int):
         return value, True
     if isinstance(value, float):
@@ -90,7 +87,7 @@ def _safe_int(value: Any, default: int) -> Tuple[int, bool]:
 
 
 def _clamp(value: int, min_val: int, max_val: int) -> Tuple[int, bool]:
-    """将值限制在范围内, 返回 (值, 是否被修正)"""
+    """将值限制在范围内，返回 (值, 是否被修正)"""
     if value < min_val:
         return min_val, True
     if value > max_val:
@@ -99,7 +96,7 @@ def _clamp(value: int, min_val: int, max_val: int) -> Tuple[int, bool]:
 
 
 def validate_time_range(time_range: Any) -> Optional[List[str]]:
-    """验证单个时间段, 返回修正后的时间段或 None"""
+    """验证单个时间段，返回修正后的时间段或 None"""
     if not isinstance(time_range, (list, tuple)):
         return None
     if len(time_range) != 2:
@@ -109,17 +106,12 @@ def validate_time_range(time_range: Any) -> Optional[List[str]]:
         return None
     if not TIME_PATTERN.match(start) or not TIME_PATTERN.match(end):
         return None
-    # 数值范围校验: 拒绝 "99:99" 等非法时间
-    for t in (start, end):
-        h, m = t.split(':')
-        if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
-            return None
     return [start, end]
 
 
 def validate_group_config(key: str, cfg: Any) -> ValidationResult:
     """
-    验证并修正单个群配置.
+    验证并修正单个群配置。
     - 检查类型正确性
     - 修正越界值
     - 填充缺失字段的默认值
@@ -203,14 +195,8 @@ def validate_group_config(key: str, cfg: Any) -> ValidationResult:
         else:
             sm_config = {}
 
-            # enabled - 严格布尔校验
-            enabled_val = sm.get("enabled", False)
-            if isinstance(enabled_val, bool):
-                sm_config["enabled"] = enabled_val
-            elif isinstance(enabled_val, str):
-                sm_config["enabled"] = enabled_val.strip().lower() in ("true", "1")
-            else:
-                sm_config["enabled"] = bool(enabled_val)
+            # enabled
+            sm_config["enabled"] = bool(sm.get("enabled", False))
 
             # cooldown
             if "cooldown" in sm:
@@ -264,8 +250,8 @@ def validate_group_config(key: str, cfg: Any) -> ValidationResult:
 
 def validate_import_config(configs: Dict[str, Any]) -> BatchValidationResult:
     """
-    批量验证导入配置.
-    对每个群配置进行字段检查, 类型校验, 范围修正和默认值填充.
+    批量验证导入配置。
+    对每个群配置进行字段检查、类型校验、范围修正和默认值填充。
     """
     batch = BatchValidationResult()
     batch.total = len(configs)
@@ -274,7 +260,7 @@ def validate_import_config(configs: Dict[str, Any]) -> BatchValidationResult:
         r = validate_group_config(key, cfg)
         batch.results[key] = r
 
-        if r.valid and r.config is not None:
+        if r.config is not None:
             batch.valid_configs[key] = r.config
             batch.valid_count += 1
             if r.warnings:

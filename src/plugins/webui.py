@@ -8,12 +8,11 @@ import hashlib
 import tempfile
 import logging
 import asyncio
-import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from functools import wraps
-from urllib.parse import quote as url_quote
 
 from nonebot import get_driver, get_bot
 from nonebot.adapters.onebot.v11 import Bot
@@ -36,38 +35,11 @@ BACKUP_DIR = Path(__file__).parent.parent.parent / "backups"
 # API 密钥（从环境变量获取，默认为空字符串表示禁用认证）
 API_KEY = os.environ.get("WEBUI_API_KEY", "")
 
+# WebUI 独立端口（从环境变量获取，默认 9090）
+WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "9090"))
+
 # 获取 NoneBot 驱动（用于生命周期钩子）
 driver = get_driver()
-
-# === 启动安全检查 ===
-_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-_nonebot_host = str(getattr(driver.config, "host", "127.0.0.1"))
-_nonebot_port = int(getattr(driver.config, "port", 8080))
-
-if not API_KEY:
-    if _nonebot_host not in _LOCAL_HOSTS:
-        logger.critical(
-            "\n"
-            "====================================================\n"
-            "  ⛔ 安全错误: WEBUI_API_KEY 未设置!\n"
-            "  NoneBot 绑定地址为 '%s' (非本地)，\n"
-            "  端口 %d 上的 WebUI API 将在无认证的情况下暴露。\n"
-            "  请在 .env 中设置 WEBUI_API_KEY 后重启。\n"
-            "====================================================\n",
-            _nonebot_host, _nonebot_port
-        )
-        sys.exit(1)
-    else:
-        logger.warning(
-            "\n"
-            "====================================================\n"
-            "  ⚠️  安全警告: WEBUI_API_KEY 为空, 认证已禁用!\n"
-            "  WebUI (端口 %d) 的 API 接口可被任何人访问。\n"
-            "  建议在 .env 中设置 WEBUI_API_KEY。\n"
-            "  当前仅绑定本地地址 '%s'，风险较低。\n"
-            "====================================================\n",
-            _nonebot_port, _nonebot_host
-        )
 
 # 创建独立的 WebUI FastAPI 应用
 webui_app = FastAPI(title="QQ Auto Mute WebUI")
@@ -81,18 +53,18 @@ async def broadcast_event(event_type: str, data: Any = None):
     """广播事件到所有已连接的 WebSocket 和 SSE 客户端"""
     message = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
 
-    # WebSocket 广播（快照迭代，避免并发修改）
+    # WebSocket 广播
     disconnected = set()
-    for ws in list(ws_clients):
+    for ws in ws_clients:
         try:
             await ws.send_text(message)
         except Exception:
             disconnected.add(ws)
     ws_clients.difference_update(disconnected)
 
-    # SSE 广播（快照迭代，避免并发修改）
+    # SSE 广播
     dead_queues = []
-    for q in list(sse_queues):
+    for q in sse_queues:
         try:
             q.put_nowait({"event": event_type, "data": data})
         except Exception:
@@ -184,17 +156,7 @@ async def webui_page():
 # === WebSocket 实时推送 ===
 @webui_app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """​WebSocket 实时推送端点（带认证）"""
-    # 在 accept 之前验证 API 密钥
-    if API_KEY:
-        # 优先从 query 参数获取，其次从 headers 获取
-        ws_api_key = websocket.query_params.get("api_key") or \
-            websocket.headers.get("x-api-key")
-        if not ws_api_key or not hmac.compare_digest(ws_api_key, API_KEY):
-            await websocket.accept()
-            await websocket.close(code=4001, reason="未授权：无效的 API 密钥")
-            return
-
+    """WebSocket 实时推送端点"""
     await websocket.accept()
     ws_clients.add(websocket)
     logger.info(f"WebSocket client connected (total: {len(ws_clients)})")
@@ -281,7 +243,7 @@ async def sse_endpoint(api_key: Optional[str] = Query(None)):
                     yield f"event: {event_type}\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
                     # 心跳保活
-                    yield ": heartbeat\n\n"
+                    yield f": heartbeat\n\n"
         except asyncio.CancelledError:
             pass
         finally:
@@ -415,10 +377,10 @@ async def update_config(config: Dict[str, Any], authorized: bool = Depends(verif
 
         # 广播配置更新事件
         try:
-            await broadcast_event("config:updated", {
+            asyncio.ensure_future(broadcast_event("config:updated", {
                 "group_ids": list(validated_config.keys()),
                 "action": "bulk_update"
-            })
+            }))
         except Exception as e:
             logger.warning(f"广播配置更新事件失败: {e}")
 
@@ -459,10 +421,10 @@ async def update_group_config(group_id: str, group_config: Dict[str, Any], autho
 
         # 广播配置更新事件
         try:
-            await broadcast_event("config:updated", {
+            asyncio.ensure_future(broadcast_event("config:updated", {
                 "group_id": group_id,
                 "action": "update"
-            })
+            }))
         except Exception as e:
             logger.warning(f"广播配置更新事件失败: {e}")
 
@@ -500,10 +462,10 @@ async def delete_group_config(group_id: str, authorized: bool = Depends(verify_a
 
     # 广播配置删除事件
     try:
-        await broadcast_event("config:updated", {
+        asyncio.ensure_future(broadcast_event("config:updated", {
             "group_id": group_id,
             "action": "delete"
-        })
+        }))
     except Exception as e:
         logger.warning(f"广播配置删除事件失败: {e}")
 
@@ -562,8 +524,6 @@ def match_groups(import_config: Dict[str, Any], qq_groups: list,
             best_score = 0.0
             for g in qq_groups:
                 g_name = g.get("group_name", "")
-                if not g_name or not g_name.strip():
-                    continue
                 # 子串包含
                 if import_key.lower() in g_name.lower() or g_name.lower() in import_key.lower():
                     score = 0.8
@@ -634,8 +594,6 @@ async def export_all_config(authorized: bool = Depends(verify_api_key)):
     config = load_config()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"config_全量_{timestamp}.json"
-    ascii_fallback = f"config_export_{timestamp}.json"
-    encoded_filename = url_quote(filename, safe="")
     
     export_data = {
         "meta": {
@@ -651,7 +609,7 @@ async def export_all_config(authorized: bool = Depends(verify_api_key)):
     return Response(
         content=content,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
     )
 
 
@@ -665,7 +623,6 @@ async def export_group_config(group_id: str, authorized: bool = Depends(verify_a
     single = {group_id: config[group_id]}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"config_{group_id}_{timestamp}.json"
-    encoded_filename = url_quote(filename, safe="")
     
     export_data = {
         "meta": {
@@ -681,7 +638,7 @@ async def export_group_config(group_id: str, authorized: bool = Depends(verify_a
     return Response(
         content=content,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
     )
 
 
@@ -691,15 +648,8 @@ async def import_preview(
     authorized: bool = Depends(verify_api_key)
 ):
     """导入预览：解析配置、匹配群聊、检测冲突"""
-    # 兼容包装格式（WebUI 导出的带 meta/configs 的文件）
-    if not isinstance(incoming, dict):
-        incoming = {}
-    configs_to_validate = incoming.get("configs", incoming)
-    if not isinstance(configs_to_validate, dict):
-        configs_to_validate = {}
-
     # 1. 使用共享验证器进行深度验证和自动修正
-    batch_result = validate_import_batch(configs_to_validate)
+    batch_result = validate_import_batch(incoming)
 
     validated = batch_result.valid_configs
     validation_errors = []
@@ -754,11 +704,10 @@ async def import_preview(
     return {
         "success": True,
         "data": {
-            "total_groups": len(configs_to_validate),
+            "total_groups": len(incoming),
             "valid_groups": len(validated),
             "validation_errors": validation_errors,
             "validation_warnings": validation_warnings,
-            "pydantic_errors": pydantic_errors,
             "match_results": match_results,
             "conflicts": conflicts,
             "stats": {
@@ -776,7 +725,7 @@ async def import_preview(
 @webui_app.post("/api/config/import")
 async def import_config(
     incoming: Dict[str, Any],
-    mode: str = Query("merge", pattern=r"^(merge|overwrite)$"),
+    mode: str = Query("merge", pattern="^(merge|overwrite)$"),
     authorized: bool = Depends(verify_api_key)
 ):
     """
@@ -788,21 +737,15 @@ async def import_config(
     }
     """
     configs = incoming.get("configs", {})
-    if not isinstance(configs, dict):
-        configs = {}
     mapping = incoming.get("mapping", {})
-    if not isinstance(mapping, dict):
-        mapping = {}
     conflict_resolution = incoming.get("conflict_resolution", {})
-    if not isinstance(conflict_resolution, dict):
-        conflict_resolution = {}
 
     # 使用共享验证器验证并修正配置
     batch_result = validate_import_batch(configs)
     validated = batch_result.valid_configs
 
     if batch_result.valid_count == 0 and batch_result.total > 0:
-        return {"success": False, "error": "所有配置验证失败", "details": list(batch_result.all_errors)}
+        return {"success": False, "error": "所有配置验证失败", "details": batch_result.all_errors}
 
     # 额外 Pydantic 校验
     pydantic_errors = []
@@ -832,13 +775,8 @@ async def import_config(
     overwritten = 0
 
     if mode == "overwrite":
-        # overwrite 模式: 合并而非替换, 保留未涉及的现有群
-        final_config = dict(existing)
-        for group_id, cfg in mapped_configs.items():
-            if group_id in final_config:
-                overwritten += 1
-            final_config[group_id] = cfg
-            applied += 1
+        final_config = mapped_configs
+        applied = len(mapped_configs)
     else:
         # merge 模式
         final_config = dict(existing)
@@ -932,12 +870,8 @@ async def restore_backup(
         with open(backup_path, "r", encoding="utf-8") as f:
             backup_config = json.load(f)
 
-        # 兼容包装格式 (WebUI 导出的带 meta/configs 的文件)
-        if isinstance(backup_config, dict) and "configs" in backup_config:
-            backup_config = backup_config["configs"]
-
         # 验证备份内容
-        for _, cfg in backup_config.items():
+        for group_id, cfg in backup_config.items():
             GroupConfig(**cfg)
 
         if not save_config(backup_config):
@@ -956,13 +890,19 @@ async def restore_backup(
         return {"success": False, "error": f"恢复失败: {str(e)}"}
 
 
-# === WebUI 挂载到 NoneBot 主应用 ===
+# === 独立 WebUI 服务器启动 ===
 @driver.on_startup
-async def mount_webui():
-    """将 WebUI 挂载到 NoneBot 主 ASGI 应用，共享同一事件循环"""
-    app = driver.server_app  # type: ignore[attr-defined]
-    app.mount("/webui", webui_app)
-    logger.info(
-        "WebUI 已挂载到 NoneBot 主应用: http://%s:%s/webui/",
-        driver.config.host, driver.config.port
+async def start_webui_server():
+    """在 NoneBot 启动时，以后台线程启动独立的 WebUI 服务器"""
+    import uvicorn
+
+    config = uvicorn.Config(
+        webui_app,
+        host="0.0.0.0",
+        port=WEBUI_PORT,
+        log_level="info"
     )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    logger.info(f"WebUI 已启动: http://localhost:{WEBUI_PORT}/")
