@@ -8,11 +8,12 @@ import hashlib
 import tempfile
 import logging
 import asyncio
-import threading
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Set
 from functools import wraps
+from urllib.parse import quote as url_quote
 
 from nonebot import get_driver, get_bot
 from nonebot.adapters.onebot.v11 import Bot
@@ -35,11 +36,38 @@ BACKUP_DIR = Path(__file__).parent.parent.parent / "backups"
 # API 密钥（从环境变量获取，默认为空字符串表示禁用认证）
 API_KEY = os.environ.get("WEBUI_API_KEY", "")
 
-# WebUI 独立端口（从环境变量获取，默认 9090）
-WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "9090"))
-
 # 获取 NoneBot 驱动（用于生命周期钩子）
 driver = get_driver()
+
+# === 启动安全检查 ===
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_nonebot_host = str(getattr(driver.config, "host", "127.0.0.1"))
+_nonebot_port = int(getattr(driver.config, "port", 8080))
+
+if not API_KEY:
+    if _nonebot_host not in _LOCAL_HOSTS:
+        logger.critical(
+            "\n"
+            "====================================================\n"
+            "  ⛔ 安全错误: WEBUI_API_KEY 未设置!\n"
+            "  NoneBot 绑定地址为 '%s' (非本地)，\n"
+            "  端口 %d 上的 WebUI API 将在无认证的情况下暴露。\n"
+            "  请在 .env 中设置 WEBUI_API_KEY 后重启。\n"
+            "====================================================\n",
+            _nonebot_host, _nonebot_port
+        )
+        sys.exit(1)
+    else:
+        logger.warning(
+            "\n"
+            "====================================================\n"
+            "  ⚠️  安全警告: WEBUI_API_KEY 为空, 认证已禁用!\n"
+            "  WebUI (端口 %d) 的 API 接口可被任何人访问。\n"
+            "  建议在 .env 中设置 WEBUI_API_KEY。\n"
+            "  当前仅绑定本地地址 '%s'，风险较低。\n"
+            "====================================================\n",
+            _nonebot_port, _nonebot_host
+        )
 
 # 创建独立的 WebUI FastAPI 应用
 webui_app = FastAPI(title="QQ Auto Mute WebUI")
@@ -594,6 +622,8 @@ async def export_all_config(authorized: bool = Depends(verify_api_key)):
     config = load_config()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"config_全量_{timestamp}.json"
+    ascii_fallback = f"config_export_{timestamp}.json"
+    encoded_filename = url_quote(filename, safe="")
     
     export_data = {
         "meta": {
@@ -609,7 +639,7 @@ async def export_all_config(authorized: bool = Depends(verify_api_key)):
     return Response(
         content=content,
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+        headers={"Content-Disposition": f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded_filename}'}
     )
 
 
@@ -623,6 +653,7 @@ async def export_group_config(group_id: str, authorized: bool = Depends(verify_a
     single = {group_id: config[group_id]}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"config_{group_id}_{timestamp}.json"
+    encoded_filename = url_quote(filename, safe="")
     
     export_data = {
         "meta": {
@@ -638,7 +669,7 @@ async def export_group_config(group_id: str, authorized: bool = Depends(verify_a
     return Response(
         content=content,
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'}
     )
 
 
@@ -725,7 +756,7 @@ async def import_preview(
 @webui_app.post("/api/config/import")
 async def import_config(
     incoming: Dict[str, Any],
-    mode: str = Query("merge", pattern="^(merge|overwrite)$"),
+    mode: str = Query("merge", pattern=r"^(merge|overwrite)$"),
     authorized: bool = Depends(verify_api_key)
 ):
     """
@@ -890,19 +921,13 @@ async def restore_backup(
         return {"success": False, "error": f"恢复失败: {str(e)}"}
 
 
-# === 独立 WebUI 服务器启动 ===
+# === WebUI 挂载到 NoneBot 主应用 ===
 @driver.on_startup
-async def start_webui_server():
-    """在 NoneBot 启动时，以后台线程启动独立的 WebUI 服务器"""
-    import uvicorn
-
-    config = uvicorn.Config(
-        webui_app,
-        host="0.0.0.0",
-        port=WEBUI_PORT,
-        log_level="info"
+async def mount_webui():
+    """将 WebUI 挂载到 NoneBot 主 ASGI 应用，共享同一事件循环"""
+    app = driver.server_app  # type: ignore[attr-defined]
+    app.mount("/webui", webui_app)
+    logger.info(
+        "WebUI 已挂载到 NoneBot 主应用: http://%s:%s/webui/",
+        driver.config.host, driver.config.port
     )
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    logger.info(f"WebUI 已启动: http://localhost:{WEBUI_PORT}/")

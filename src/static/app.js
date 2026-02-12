@@ -2,6 +2,13 @@
 // QQ 自动禁言 - WebUI 前端
 // ============================================================
 
+// === 基础路径检测（支持子路径挂载，如 /webui） ===
+var API_BASE = (function () {
+    var path = location.pathname.replace(/\/+$/, '');
+    // 移除可能的 index.html 后缀
+    return path.replace(/\/index\.html$/i, '') || '';
+})();
+
 // === IndexedDB 持久化模块 ===
 const IDB = {
     DB_NAME: 'QQAutoMuteDB',
@@ -299,7 +306,7 @@ const RealtimeChannel = {
 
     tryWebSocket() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = protocol + '//' + location.host + '/ws';
+        const wsUrl = protocol + '//' + location.host + API_BASE + '/ws';
 
         try {
             this.ws = new WebSocket(wsUrl);
@@ -350,7 +357,7 @@ const RealtimeChannel = {
     tryEventSource() {
         try {
             const apiKey = localStorage.getItem('apiKey');
-            let url = '/api/events';
+            let url = API_BASE + '/api/events';
             if (apiKey) url += '?api_key=' + encodeURIComponent(apiKey);
 
             this.eventSource = new EventSource(url);
@@ -748,7 +755,8 @@ async function api(endpoint, options) {
             headers['X-API-KEY'] = apiKey;
         }
 
-        var response = await fetch(endpoint, Object.assign({}, options, { headers: headers }));
+        var url = API_BASE + endpoint;
+        var response = await fetch(url, Object.assign({}, options, { headers: headers }));
 
         if (response.status === 401) {
             localStorage.removeItem('apiKey');
@@ -1679,11 +1687,12 @@ function openBatchExportModal() {
 
     listContainer.innerHTML = savedGroups.map(function (gid) {
         var name = escapeHtml(groupNameMap[gid] || '\u672a\u77e5\u7fa4\u804a');
-        return '<label class="export-group-item" data-gid="' + gid + '">'
-            + '<input type="checkbox" checked value="' + gid + '">'
+        var safeGid = escapeHtml(String(gid));
+        return '<label class="export-group-item" data-gid="' + safeGid + '">'
+            + '<input type="checkbox" checked value="' + safeGid + '">'
             + '<div class="export-group-info">'
             + '<span class="export-group-name">' + name + '</span>'
-            + '<span class="export-group-id">' + gid + '</span>'
+            + '<span class="export-group-id">' + safeGid + '</span>'
             + '</div>'
             + '</label>';
     }).join('');
