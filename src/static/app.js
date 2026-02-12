@@ -1923,7 +1923,17 @@ function validateGroupConfig(key, cfg) {
                         if (Array.isArray(r) && r.length === 2 &&
                             typeof r[0] === 'string' && typeof r[1] === 'string' &&
                             /^\d{2}:\d{2}$/.test(r[0]) && /^\d{2}:\d{2}$/.test(r[1])) {
-                            validDayRanges.push(r);
+                            // 数值范围校验: 拒绝 "99:99" 等非法时间
+                            var parts0 = r[0].split(':');
+                            var parts1 = r[1].split(':');
+                            var h0 = parseInt(parts0[0], 10), m0 = parseInt(parts0[1], 10);
+                            var h1 = parseInt(parts1[0], 10), m1 = parseInt(parts1[1], 10);
+                            if (h0 >= 0 && h0 <= 23 && m0 >= 0 && m0 <= 59 &&
+                                h1 >= 0 && h1 <= 23 && m1 >= 0 && m1 <= 59) {
+                                validDayRanges.push(r);
+                            } else {
+                                warnings.push('时间段格式无效 [' + JSON.stringify(r) + ']，已忽略');
+                            }
                         } else {
                             warnings.push('时间段格式无效 [' + JSON.stringify(r) + ']，已忽略');
                         }
@@ -2343,14 +2353,29 @@ async function executeImport() {
         await loadGroups();
 
         // 同步到 IndexedDB（标记已同步）
-        var appliedConfigs = result.applied_configs || importParsedConfig;
+        var appliedConfigs;
+        if (result.applied_configs) {
+            appliedConfigs = result.applied_configs;
+        } else {
+            // 根据服务端返回的信息过滤出实际应用的配置
+            var resultMapping = result.mapping || {};
+            var keepExisting = result.keep_existing || [];
+            appliedConfigs = {};
+            for (var filterGid of Object.keys(importParsedConfig)) {
+                // 包含有映射且非空的, 排除保留现有/跳过的
+                var mappedTarget = resultMapping[filterGid];
+                if (keepExisting.includes(filterGid)) continue;
+                if (Object.keys(resultMapping).length > 0 && !mappedTarget) continue;
+                appliedConfigs[mappedTarget || filterGid] = importParsedConfig[filterGid];
+            }
+        }
         try {
             await IDB.bulkPut(appliedConfigs, false);
         } catch (idbErr) {
             console.warn('[IDB] Failed to persist imported config:', idbErr);
         }
-        for (var gid of Object.keys(appliedConfigs)) {
-            groupSavedState[gid] = true;
+        for (var syncGid of Object.keys(appliedConfigs)) {
+            groupSavedState[syncGid] = true;
         }
 
         if (currentGroupId) {

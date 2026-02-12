@@ -191,6 +191,7 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_api_key = websocket.query_params.get("api_key") or \
             websocket.headers.get("x-api-key")
         if not ws_api_key or not hmac.compare_digest(ws_api_key, API_KEY):
+            await websocket.accept()
             await websocket.close(code=4001, reason="未授权：无效的 API 密钥")
             return
 
@@ -823,8 +824,13 @@ async def import_config(
     overwritten = 0
 
     if mode == "overwrite":
-        final_config = mapped_configs
-        applied = len(mapped_configs)
+        # overwrite 模式: 合并而非替换, 保留未涉及的现有群
+        final_config = dict(existing)
+        for group_id, cfg in mapped_configs.items():
+            if group_id in final_config:
+                overwritten += 1
+            final_config[group_id] = cfg
+            applied += 1
     else:
         # merge 模式
         final_config = dict(existing)
@@ -918,8 +924,12 @@ async def restore_backup(
         with open(backup_path, "r", encoding="utf-8") as f:
             backup_config = json.load(f)
 
+        # 兼容包装格式 (WebUI 导出的带 meta/configs 的文件)
+        if isinstance(backup_config, dict) and "configs" in backup_config:
+            backup_config = backup_config["configs"]
+
         # 验证备份内容
-        for group_id, cfg in backup_config.items():
+        for _, cfg in backup_config.items():
             GroupConfig(**cfg)
 
         if not save_config(backup_config):
