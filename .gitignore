@@ -27,3 +27,6 @@ Thumbs.db
 
 # Environment variables (copy from .env.example)
 .env
+
+# Config backups (auto-generated)
+backups/
