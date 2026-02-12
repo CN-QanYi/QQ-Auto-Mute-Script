@@ -788,15 +788,21 @@ async def import_config(
     }
     """
     configs = incoming.get("configs", {})
+    if not isinstance(configs, dict):
+        configs = {}
     mapping = incoming.get("mapping", {})
+    if not isinstance(mapping, dict):
+        mapping = {}
     conflict_resolution = incoming.get("conflict_resolution", {})
+    if not isinstance(conflict_resolution, dict):
+        conflict_resolution = {}
 
     # 使用共享验证器验证并修正配置
     batch_result = validate_import_batch(configs)
     validated = batch_result.valid_configs
 
     if batch_result.valid_count == 0 and batch_result.total > 0:
-        return {"success": False, "error": "所有配置验证失败", "details": batch_result.all_errors}
+        return {"success": False, "error": "所有配置验证失败", "details": list(batch_result.all_errors)}
 
     # 额外 Pydantic 校验
     pydantic_errors = []
