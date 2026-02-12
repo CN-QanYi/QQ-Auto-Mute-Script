@@ -106,6 +106,11 @@ def validate_time_range(time_range: Any) -> Optional[List[str]]:
         return None
     if not TIME_PATTERN.match(start) or not TIME_PATTERN.match(end):
         return None
+    # 数值范围校验：拒绝 "99:99" 等非法时间
+    for t in (start, end):
+        h, m = t.split(':')
+        if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
+            return None
     return [start, end]
 
 
@@ -260,7 +265,7 @@ def validate_import_config(configs: Dict[str, Any]) -> BatchValidationResult:
         r = validate_group_config(key, cfg)
         batch.results[key] = r
 
-        if r.config is not None:
+        if r.valid and r.config is not None:
             batch.valid_configs[key] = r.config
             batch.valid_count += 1
             if r.warnings:

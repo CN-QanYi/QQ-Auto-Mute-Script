@@ -184,7 +184,16 @@ async def webui_page():
 # === WebSocket 实时推送 ===
 @webui_app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 实时推送端点"""
+    """​WebSocket 实时推送端点（带认证）"""
+    # 在 accept 之前验证 API 密钥
+    if API_KEY:
+        # 优先从 query 参数获取，其次从 headers 获取
+        ws_api_key = websocket.query_params.get("api_key") or \
+            websocket.headers.get("x-api-key")
+        if not ws_api_key or not hmac.compare_digest(ws_api_key, API_KEY):
+            await websocket.close(code=4001, reason="未授权：无效的 API 密钥")
+            return
+
     await websocket.accept()
     ws_clients.add(websocket)
     logger.info(f"WebSocket client connected (total: {len(ws_clients)})")
@@ -679,8 +688,11 @@ async def import_preview(
     authorized: bool = Depends(verify_api_key)
 ):
     """导入预览：解析配置、匹配群聊、检测冲突"""
+    # 兼容包装格式（WebUI 导出的带 meta/configs 的文件）
+    configs_to_validate = incoming.get("configs", incoming)
+
     # 1. 使用共享验证器进行深度验证和自动修正
-    batch_result = validate_import_batch(incoming)
+    batch_result = validate_import_batch(configs_to_validate)
 
     validated = batch_result.valid_configs
     validation_errors = []

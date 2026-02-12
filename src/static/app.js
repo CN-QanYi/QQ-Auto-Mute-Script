@@ -1321,14 +1321,33 @@ async function loadConfig() {
     var result = await api('/api/config');
     if (result.success) {
         config = result.data;
-        groupSavedState = {};
+        // 保留本地待同步状态：不覆盖 pending_sync 记录
         for (var groupId of Object.keys(config)) {
-            groupSavedState[groupId] = true;
+            if (groupSavedState[groupId] !== 'pending' && groupSavedState[groupId] !== false) {
+                groupSavedState[groupId] = true;
+            }
         }
 
-        // 同步到 IndexedDB（标记已同步）
+        // 同步到 IndexedDB，保留本地待同步的记录
         try {
-            await IDB.bulkPut(config, false);
+            var existingRecords = await IDB.getAll();
+            var pendingIds = {};
+            existingRecords.forEach(function (rec) {
+                if (rec.pending_sync) {
+                    pendingIds[rec.group_id] = true;
+                }
+            });
+
+            // 只写入非 pending 的记录
+            var toSync = {};
+            for (var gid of Object.keys(config)) {
+                if (!pendingIds[gid]) {
+                    toSync[gid] = config[gid];
+                }
+            }
+            if (Object.keys(toSync).length > 0) {
+                await IDB.bulkPut(toSync, false);
+            }
         } catch (e) {
             console.warn('[IDB] Failed to sync config to IndexedDB:', e);
         }
@@ -1532,6 +1551,14 @@ async function saveConfig() {
         }
     } else {
         showToast('\u4fdd\u5b58\u5931\u8d25: ' + result.error, 'error');
+
+        // 离线持久化：将失败的配置写入 IndexedDB 并标记为待同步
+        try {
+            await IDB.put(currentGroupId, config[currentGroupId], true);
+        } catch (e) {
+            console.warn('[IDB] Failed to persist pending config:', e);
+        }
+        groupSavedState[currentGroupId] = 'pending';
     }
 }
 
