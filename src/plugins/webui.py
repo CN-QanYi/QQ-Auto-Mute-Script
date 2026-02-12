@@ -415,10 +415,10 @@ async def update_config(config: Dict[str, Any], authorized: bool = Depends(verif
 
         # 广播配置更新事件
         try:
-            asyncio.ensure_future(broadcast_event("config:updated", {
+            await broadcast_event("config:updated", {
                 "group_ids": list(validated_config.keys()),
                 "action": "bulk_update"
-            }))
+            })
         except Exception as e:
             logger.warning(f"广播配置更新事件失败: {e}")
 
@@ -459,10 +459,10 @@ async def update_group_config(group_id: str, group_config: Dict[str, Any], autho
 
         # 广播配置更新事件
         try:
-            asyncio.ensure_future(broadcast_event("config:updated", {
+            await broadcast_event("config:updated", {
                 "group_id": group_id,
                 "action": "update"
-            }))
+            })
         except Exception as e:
             logger.warning(f"广播配置更新事件失败: {e}")
 
@@ -500,10 +500,10 @@ async def delete_group_config(group_id: str, authorized: bool = Depends(verify_a
 
     # 广播配置删除事件
     try:
-        asyncio.ensure_future(broadcast_event("config:updated", {
+        await broadcast_event("config:updated", {
             "group_id": group_id,
             "action": "delete"
-        }))
+        })
     except Exception as e:
         logger.warning(f"广播配置删除事件失败: {e}")
 
@@ -562,6 +562,8 @@ def match_groups(import_config: Dict[str, Any], qq_groups: list,
             best_score = 0.0
             for g in qq_groups:
                 g_name = g.get("group_name", "")
+                if not g_name or not g_name.strip():
+                    continue
                 # 子串包含
                 if import_key.lower() in g_name.lower() or g_name.lower() in import_key.lower():
                     score = 0.8
